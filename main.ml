@@ -1,0 +1,1 @@
+let () = Chemic.Cli.main ()

@@ -1,1 +1,1 @@
-val gen_code: Parse.form -> string
+val gen_code: Parse.form list -> string

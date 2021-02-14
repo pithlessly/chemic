@@ -66,7 +66,9 @@ let rec write_form ~prec form: writer =
   | Op (Minus, [x]) ->
     let f = write_form ~prec:Prec.unary in
     paren_if (prec > Prec.unary)
-      (concat [write_string "-"; f x])
+      (* we need a space after the operator to prevent two consecutive ones
+       * from being treated as a decrement *)
+      (concat [write_string "- "; f x])
   | Op (Minus, x :: xs) ->
     (* the precedence for the subexpressions of the LHS and RHS of
      * subtraction are different, because `a - b - c` is the same
@@ -89,14 +91,16 @@ let rec write_form ~prec form: writer =
   | _ -> raise (Invalid_argument "invalid expression")
 
 (* Convert a form into a C program. *)
-let gen_code form =
+let gen_code forms =
   let buf = Buffer.create 2048 in
   let emit = Buffer.add_string buf in
   emit "#include <stdio.h>\n";
   emit "int main() {\n";
-  emit "    printf(\"%d\", ";
-  write_form ~prec:0 form buf;
-  emit ");\n";
+  forms |> List.iter (fun form ->
+      emit "    printf(\"%d\\n\", ";
+      write_form ~prec:0 form buf;
+      emit ");\n";
+    );
   emit "    return 0;\n";
   emit "}\n";
   Buffer.contents buf

@@ -102,8 +102,4 @@ and parse_many ~top_level state: form list * state =
 (* the global parsing function *)
 
 let parse code =
-  let forms, state = parse_many ~top_level:true { code; pos = 0 } in
-  match forms with
-  | [] -> fail state "expected form, got EOF"
-  | [form] -> form
-  | _ -> fail state "too many forms"
+  parse_many ~top_level:true { code; pos = 0 } |> fst

@@ -1,4 +1,5 @@
 (executable
  (name        main)
+ (modes       byte exe)
  (public_name chemic_cli)
  (libraries   chemic))

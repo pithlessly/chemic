@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <inttypes.h>
 
 typedef int64_t i64;
 const i64 MIN_I64 = ~9223372036854775807;
@@ -41,5 +42,5 @@ i64 neg(i64 a) {
 }
 
 void print(i64 a) {
-    printf("%lld\n", a);
+    printf("%" PRId64 "\n", a);
 }

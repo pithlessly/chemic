@@ -10,6 +10,14 @@ void die(char *msg) {
     exit(1);
 }
 
+i64 make_int(i64 a) {
+    return a;
+}
+
+i64 make_string(char const *ptr, int len) {
+    return len;
+}
+
 i64 add(i64 a, i64 b) {
     i64 res;
     if (__builtin_add_overflow(a, b, &res)) {
@@ -39,6 +47,10 @@ i64 neg(i64 a) {
         die("underflow in unary - operator");
     }
     return -a;
+}
+
+i64 len(i64 a) {
+    return a;
 }
 
 void print(i64 a) {

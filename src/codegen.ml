@@ -2,10 +2,14 @@ type op = Parse.op =
   | Plus
   | Minus
   | Times
+  | Comma
 
 type form = Parse.form =
   | Int of int64
+  | String of string
   | Op of op * form list
+
+let bprintf = Printf.bprintf
 
 let write_nested buf name ~f init xs =
   let rec loop = function
@@ -19,10 +23,33 @@ let write_nested buf name ~f init xs =
       Buffer.add_char buf ')';
   in loop (List.rev xs)
 
+let write_string_literal buf s =
+  let len = String.length s in
+  let rec loop n =
+    if n < len then (
+      let c = String.get s n in
+      if ' ' <= c && c <= '~' then (
+        if c = '\\' || c = '"' then
+          Buffer.add_char buf '\\';
+        Buffer.add_char buf c
+      ) else
+        bprintf buf "\\%02x" (Char.code c);
+      loop (n + 1)
+    )
+  in
+  Buffer.add_char buf '"';
+  loop 0;
+  Buffer.add_char buf '"'
+
 let rec write_form buf =
   function
   | Int i ->
-    Buffer.add_string buf (Int64.to_string i)
+    bprintf buf "make_int(%Ld)" i;
+
+  | String s ->
+    bprintf buf "make_string(%a,%d)"
+      write_string_literal s
+      (String.length s)
 
   | Op (Plus, []) ->
     Buffer.add_char buf '0'
@@ -30,9 +57,7 @@ let rec write_form buf =
     write_nested ~f:write_form buf "add" x xs
 
   | Op (Minus, [x]) ->
-    Buffer.add_string buf "neg(";
-    write_form buf x;
-    Buffer.add_string buf ")";
+    bprintf buf "neg(%a)" write_form x
   | Op (Minus, x :: xs) ->
     write_nested ~f:write_form buf "sub" x xs
 
@@ -41,7 +66,12 @@ let rec write_form buf =
   | Op (Times, x :: xs) ->
     write_nested ~f:write_form buf "mul" x xs
 
-  | _ -> raise (Invalid_argument "invalid expression")
+  | Op (Comma, [x]) ->
+    bprintf buf "len(%a)" write_form x
+
+  | Op (Comma, _)
+  | Op (Minus, []) ->
+    raise (Invalid_argument "invalid expression")
 
 (* Convert a form into a C program. *)
 let gen_code forms =
@@ -57,18 +87,3 @@ let gen_code forms =
   emit "    return 0;\n";
   emit "}\n";
   Buffer.contents buf
-
-(*
-(* Write a form as a C expression. *)
-let rec write_form ~prec form: writer =
-  match form with
-  | Op (Times, []) ->
-    write_string "1"
-  | Op (Times, x :: xs) ->
-    let f = write_form ~prec:Prec.times in
-    paren_if (prec > Prec.times)
-      (concat [f x; write_all ~f " * " xs])
-
-  | _ -> raise (Invalid_argument "invalid expression")
-
-   *)

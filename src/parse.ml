@@ -43,9 +43,11 @@ type op =
   | Plus
   | Minus
   | Times
+  | Comma
 
 type form =
   | Int of int64
+  | String of string
   | Op of op * form list
 
 (* incremental parsing functions which return the new state *)
@@ -64,12 +66,26 @@ let parse_num state: int64 * state =
   | Some n -> (n, state)
   | None -> fail state "integer literal too large"
 
+let parse_string state: string * state =
+  let chars = Buffer.create max_literal_len in
+  let rec loop state =
+    match current_char state with
+    | Some '"' -> state
+    | Some c ->
+      Buffer.add_char chars c;
+      loop (advance state)
+    | None -> fail state "expected string literal, got EOF"
+  in
+  let state = loop state in
+  (Buffer.contents chars, advance state)
+
 let rec parse_op state: op * state =
   let make_op o = (o, advance state) in
   match current_char state with
   | Some '+' -> make_op Plus
   | Some '-' -> make_op Minus
   | Some '*' -> make_op Times
+  | Some ',' -> make_op Comma
   | Some c when is_space c -> parse_op (advance state)
   | Some c -> fail state (Printf.sprintf "invalid operator: '%s'" (Char.escaped c))
   | None -> fail state "expected operator, got EOF"
@@ -88,6 +104,9 @@ let rec try_parse ~(top_level: bool) state: form option * state =
     let op, state = parse_op (advance state) in
     let args, state = parse_many ~top_level:false state in
     (Some (Op (op, args)), state)
+  | Some '"' ->
+    let s, state = parse_string (advance state) in
+    (Some (String s), state)
   | Some c when is_digit c ->
     let n, state = parse_num state in
     (Some (Int n), state)

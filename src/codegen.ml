@@ -52,7 +52,7 @@ let rec write_form buf =
       (String.length s)
 
   | Op (Plus, []) ->
-    Buffer.add_char buf '0'
+    Buffer.add_string buf "OBJ_0"
   | Op (Plus, x :: xs) ->
     write_nested ~f:write_form buf "add" x xs
 
@@ -62,7 +62,7 @@ let rec write_form buf =
     write_nested ~f:write_form buf "sub" x xs
 
   | Op (Times, []) ->
-    Buffer.add_char buf '1'
+    Buffer.add_string buf "OBJ_1"
   | Op (Times, x :: xs) ->
     write_nested ~f:write_form buf "mul" x xs
 

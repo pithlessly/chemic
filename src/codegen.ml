@@ -42,7 +42,7 @@ let write_string_literal s buf =
           Buffer.add_char buf '\\';
         Buffer.add_char buf c
       ) else
-        bprintf buf "\\%02x" (Char.code c);
+        bprintf buf "\\x%02x" (Char.code c);
       loop (n + 1)
     )
   in

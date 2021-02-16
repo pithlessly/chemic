@@ -92,16 +92,23 @@ let parse_ident_like state: form * state =
 
 let parse_string state: string * state =
   let chars = Buffer.create max_literal_len in
-  let rec loop state =
-    match current_char state with
-    | Some '"' -> state
-    | Some c ->
-      Buffer.add_char chars c;
-      loop (advance state)
-    | None -> fail state "expected string literal, got EOF"
+  let add = Buffer.add_char chars in
+  let rec loop escaped state =
+    match escaped, current_char state with
+    | _, None          -> fail state "unexpected end of string literal"
+    | false, Some '"'  -> advance state
+    | false, Some '\\' -> loop true (advance state)
+    | false, Some c    -> add c;      loop false (advance state)
+    | true, Some '"'   -> add '"';    loop false (advance state)
+    | true, Some '\\'  -> add '\\';   loop false (advance state)
+    | true, Some 'n'   -> add '\n';   loop false (advance state)
+    | true, Some 't'   -> add '\t';   loop false (advance state)
+    | true, Some 'r'   -> add '\r';   loop false (advance state)
+    | true, Some '0'   -> add '\000'; loop false (advance state)
+    | true, Some c     -> fail state (Printf.sprintf "invalid escape sequence: \\%c" c)
   in
-  let state = loop state in
-  (Buffer.contents chars, advance state)
+  let state = loop false state in
+  (Buffer.contents chars, state)
 
 let parse_op state: op * state =
   let id, state = parse_ident_like (skip_whitespace state) in

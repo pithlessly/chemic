@@ -8,6 +8,7 @@ type op = Parse.op =
 type form = Parse.form =
   | Int of int64
   | String of string
+  | Ident of string
   | Op of op * form list
 
 let bprintf = Printf.bprintf
@@ -157,6 +158,7 @@ let write_form ~gctx ~vctx =
       let form = go ~var x in
       fun buf -> bprintf buf "%tprint(%t);" form (Var.write var)
 
+    | Ident _
     | Op (Minus, [])
     | Op (Len, _)
     | Op (Print, _) ->

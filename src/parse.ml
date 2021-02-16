@@ -17,6 +17,12 @@ let is_space c =
 let is_digit c =
   '0' <= c && c <= '9'
 
+let is_ident c =
+  ('a' <= c && c <= 'z') ||
+  ('A' <= c && c <= 'Z') ||
+  List.mem c ['!'; '$'; '%'; '&'; '*'; '/'; ':'; '<'; '=';
+              '>'; '?'; '^'; '_'; '~'; '+'; '-'; '.'; '@']
+
 (* the longest number of characters possible in a 64-bit integer literal *)
 
 let max_literal_len = Int64.(max_int |> to_string) |> String.length
@@ -49,9 +55,16 @@ type op =
 type form =
   | Int of int64
   | String of string
+  | Ident of string
   | Op of op * form list
 
 (* incremental parsing functions which return the new state *)
+
+let rec skip_whitespace state: state =
+  match current_char state with
+  | Some c when is_space c ->
+    skip_whitespace (advance state)
+  | _ -> state
 
 let parse_num state: int64 * state =
   let digits = Buffer.create max_literal_len in
@@ -67,6 +80,18 @@ let parse_num state: int64 * state =
   | Some n -> (n, state)
   | None -> fail state "integer literal too large"
 
+let parse_ident state: string * state =
+  let chars = Buffer.create max_literal_len in
+  let rec loop state =
+    match current_char state with
+    | Some c when is_ident c || is_digit c ->
+      Buffer.add_char chars c;
+      loop (advance state)
+    | _ -> state
+  in
+  let state = loop state in
+  (Buffer.contents chars, state)
+
 let parse_string state: string * state =
   let chars = Buffer.create max_literal_len in
   let rec loop state =
@@ -80,19 +105,20 @@ let parse_string state: string * state =
   let state = loop state in
   (Buffer.contents chars, advance state)
 
-let rec parse_op state: op * state =
-  let make_op o = (o, advance state) in
-  match current_char state with
-  | Some '+' -> make_op Plus
-  | Some '-' -> make_op Minus
-  | Some '*' -> make_op Times
-  | Some ',' -> make_op Len
-  | Some '.' -> make_op Print
-  | Some c when is_space c -> parse_op (advance state)
-  | Some c -> fail state (Printf.sprintf "invalid operator: '%s'" (Char.escaped c))
-  | None -> fail state "expected operator, got EOF"
+let parse_op state: op * state =
+  let id, state = parse_ident (skip_whitespace state) in
+  let op = match id with
+    | "+" -> Plus
+    | "-" -> Minus
+    | "*" -> Times
+    | "len" -> Len
+    | "display" -> Print
+    | "" -> fail state "expected operator, got EOF"
+    | s -> fail state (Printf.sprintf "invalid operator: \"%s\"" (String.escaped s))
+  in (op, state)
 
 let rec try_parse ~(top_level: bool) state: form option * state =
+  let state = skip_whitespace state in
   match current_char state with
   | None ->
     if top_level
@@ -112,8 +138,9 @@ let rec try_parse ~(top_level: bool) state: form option * state =
   | Some c when is_digit c ->
     let n, state = parse_num state in
     (Some (Int n), state)
-  | Some c when is_space c ->
-    try_parse ~top_level (advance state)
+  | Some c when is_ident c ->
+    let id, state = parse_ident state in
+    (Some (Ident id), state)
   | Some c -> fail state (Printf.sprintf "unrecognized character '%s'"
                             (Char.escaped c))
 

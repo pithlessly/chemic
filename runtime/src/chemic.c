@@ -2,100 +2,87 @@
 
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
 
 #define I64_MIN (~9223372036854775807)
 
-inline static void die(char *msg) {
-    fprintf(stderr, "fatal error: %s\n", msg);
-    exit(1);
-}
-
-inline static const char* type_name(Tag t) {
-    switch (t) {
-        case tag_int: return "int";
-        case tag_str: return "string";
-    }
-}
-
-inline static void kill(Obj o) {
-    if (o.tag == tag_str) {
-        free(o.data.s);
-    }
-}
-
-inline static void expect(Obj o, Tag t) {
-    if (o.tag != t) {
-        kill(o);
-        char msg[30];
-        sprintf(msg, "expected %s, got %s", type_name(t), type_name(o.tag));
-        die(msg);
-    }
-}
-
-Obj make_int(int64_t i) {
-    Obj res;
-    res.tag = tag_int;
-    res.data.i = i;
-    return res;
-}
-
-/* allocate an object with the given string value */
-Obj make_string(char *data, size_t size) {
-    Obj res;
-    res.tag = tag_str;
-    res.data.s = malloc(sizeof(Str) + size);
-    if (!res.data.s) {
-        die("cannot allocate memory for string literal");
-    }
-    res.data.s->len = size;
-    memcpy(&res.data.s->data, data, size);
-    return res;
-}
-
 Obj add(Obj a, Obj b) {
-    expect(a, tag_int);
-    expect(b, tag_int);
+    EXPECT(a, tag_int, "int");
+    EXPECT(b, tag_int, "int");
     int64_t res;
     if (__builtin_add_overflow(a.data.i, b.data.i, &res)) {
-        die("addition overflow");
+        DIE("addition overflow");
     }
-    return make_int(res);
+    MAKE_INT(a, res);
+    return a;
 }
 
 Obj sub(Obj a, Obj b) {
-    expect(a, tag_int);
-    expect(b, tag_int);
+    EXPECT(a, tag_int, "int");
+    EXPECT(b, tag_int, "int");
     int64_t res;
     if (__builtin_sub_overflow(a.data.i, b.data.i, &res)) {
-        die("subtraction overflow");
+        DIE("subtraction overflow");
     }
-    return make_int(res);
+    MAKE_INT(a, res);
+    return a;
 }
 
 Obj neg(Obj a) {
-    expect(a, tag_int);
+    EXPECT(a, tag_int, "int");
     if (a.data.i == I64_MIN) {
-        die("negate underflow");
+        DIE("negate underflow");
     }
-    return make_int(-a.data.i);
+    MAKE_INT(a, -a.data.i);
+    return a;
 }
 
 Obj mul(Obj a, Obj b) {
-    expect(a, tag_int);
-    expect(b, tag_int);
+    EXPECT(a, tag_int, "int");
+    EXPECT(b, tag_int, "int");
     int64_t res;
     if (__builtin_mul_overflow(a.data.i, b.data.i, &res)) {
-        die("multiplication overflow");
+        DIE("multiplication overflow");
     }
-    return make_int(res);
+    MAKE_INT(a, res);
+    return a;
 }
 
 Obj len(Obj a) {
-    expect(a, tag_str);
+    EXPECT(a, tag_str, "str");
     size_t len = a.data.s->len;
     kill(a);
-    return make_int(len);
+    MAKE_INT(a, len);
+    return a;
+}
+
+inline static Str *str_dup(Str *s) {
+    Str *new = malloc(sizeof(Str) + s->len);
+    if (!new) { DIE("out of memory"); }
+    new->len = s->len;
+    memcpy(&new->data, &s->data, s->len);
+    return new;
+}
+
+static Obj copy(Obj a) {
+    switch (a.tag) {
+        case tag_int:
+            break;
+        case tag_str:
+            a.data.s = str_dup(a.data.s);
+            break;
+    }
+    return a;
+}
+
+static Obj reg = {.tag = tag_int, .data = {.i = 1234}};
+
+void reg_save(Obj a) {
+    kill(reg);
+    reg = copy(a);
+}
+
+Obj reg_restore() {
+    return copy(reg);
 }
 
 void print(Obj a) {
@@ -108,4 +95,14 @@ void print(Obj a) {
             putchar('\n');
             break;
     }
+}
+
+void kill(Obj o) {
+    if (o.tag == tag_str) {
+        free(o.data.s);
+    }
+}
+
+void finalize() {
+    kill(reg);
 }

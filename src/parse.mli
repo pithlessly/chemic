@@ -2,7 +2,8 @@ type op =
   | Plus
   | Minus
   | Times
-  | Comma
+  | Len
+  | Register
 
 type form =
   | Int of int64

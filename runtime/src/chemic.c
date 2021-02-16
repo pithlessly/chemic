@@ -6,8 +6,8 @@
 #define I64_MIN (~9223372036854775807)
 
 Obj add(Obj a, Obj b) {
-    EXPECT(a, tag_int, "int");
-    EXPECT(b, tag_int, "int");
+    EXPECT(a, tag_int);
+    EXPECT(b, tag_int);
     if (__builtin_add_overflow(a.data.i, b.data.i, &a.data.i)) {
         DIE("addition overflow");
     }
@@ -15,8 +15,8 @@ Obj add(Obj a, Obj b) {
 }
 
 Obj sub(Obj a, Obj b) {
-    EXPECT(a, tag_int, "int");
-    EXPECT(b, tag_int, "int");
+    EXPECT(a, tag_int);
+    EXPECT(b, tag_int);
     if (__builtin_sub_overflow(a.data.i, b.data.i, &a.data.i)) {
         DIE("subtraction overflow");
     }
@@ -24,7 +24,7 @@ Obj sub(Obj a, Obj b) {
 }
 
 Obj neg(Obj a) {
-    EXPECT(a, tag_int, "int");
+    EXPECT(a, tag_int);
     if (a.data.i == I64_MIN) {
         DIE("negate underflow");
     }
@@ -33,8 +33,8 @@ Obj neg(Obj a) {
 }
 
 Obj mul(Obj a, Obj b) {
-    EXPECT(a, tag_int, "int");
-    EXPECT(b, tag_int, "int");
+    EXPECT(a, tag_int);
+    EXPECT(b, tag_int);
     if (__builtin_mul_overflow(a.data.i, b.data.i, &a.data.i)) {
         DIE("multiplication overflow");
     }
@@ -42,34 +42,39 @@ Obj mul(Obj a, Obj b) {
 }
 
 Obj len(Obj a) {
-    EXPECT(a, tag_str, "str");
+    EXPECT(a, tag_str);
     size_t len = a.data.s->len;
     deinit(a);
     MAKE_INT(a, len);
     return a;
 }
 
-inline static Str *str_dup(Str *s) {
-    Str *new = malloc(sizeof(Str) + s->len);
-    if (!new) { DIE("out of memory"); }
-    new->len = s->len;
-    memcpy(&new->data, &s->data, s->len);
-    return new;
+inline static void str_del(Str *s) {
+    if (s->ref_count > 0) {
+        s->ref_count--;
+        if (s->ref_count == 0) {
+            free(s);
+        }
+    }
 }
 
-static Obj copy(Obj a) {
+static void copy(Obj a) {
     switch (a.tag) {
+        case tag_nil:
         case tag_int:
             break;
         case tag_str:
-            a.data.s = str_dup(a.data.s);
+            if (a.data.s->ref_count > 0) {
+                a.data.s->ref_count++;
+            }
             break;
     }
-    return a;
 }
 
 void print(Obj a) {
     switch (a.tag) {
+        case tag_nil:
+            puts("()");
         case tag_int:
             printf("%" PRId64 "\n", a.data.i);
             break;
@@ -82,7 +87,7 @@ void print(Obj a) {
 
 void deinit(Obj o) {
     if (o.tag == tag_str) {
-        free(o.data.s);
+        str_del(o.data.s);
     }
 }
 

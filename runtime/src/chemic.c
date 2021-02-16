@@ -8,22 +8,18 @@
 Obj add(Obj a, Obj b) {
     EXPECT(a, tag_int, "int");
     EXPECT(b, tag_int, "int");
-    int64_t res;
-    if (__builtin_add_overflow(a.data.i, b.data.i, &res)) {
+    if (__builtin_add_overflow(a.data.i, b.data.i, &a.data.i)) {
         DIE("addition overflow");
     }
-    MAKE_INT(a, res);
     return a;
 }
 
 Obj sub(Obj a, Obj b) {
     EXPECT(a, tag_int, "int");
     EXPECT(b, tag_int, "int");
-    int64_t res;
-    if (__builtin_sub_overflow(a.data.i, b.data.i, &res)) {
+    if (__builtin_sub_overflow(a.data.i, b.data.i, &a.data.i)) {
         DIE("subtraction overflow");
     }
-    MAKE_INT(a, res);
     return a;
 }
 
@@ -32,18 +28,16 @@ Obj neg(Obj a) {
     if (a.data.i == I64_MIN) {
         DIE("negate underflow");
     }
-    MAKE_INT(a, -a.data.i);
+    a.data.i = -a.data.i;
     return a;
 }
 
 Obj mul(Obj a, Obj b) {
     EXPECT(a, tag_int, "int");
     EXPECT(b, tag_int, "int");
-    int64_t res;
-    if (__builtin_mul_overflow(a.data.i, b.data.i, &res)) {
+    if (__builtin_mul_overflow(a.data.i, b.data.i, &a.data.i)) {
         DIE("multiplication overflow");
     }
-    MAKE_INT(a, res);
     return a;
 }
 
@@ -74,17 +68,6 @@ static Obj copy(Obj a) {
     return a;
 }
 
-static Obj reg = {.tag = tag_int, .data = {.i = 1234}};
-
-void reg_save(Obj a) {
-    deinit(reg);
-    reg = copy(a);
-}
-
-Obj reg_restore() {
-    return copy(reg);
-}
-
 void print(Obj a) {
     switch (a.tag) {
         case tag_int:
@@ -103,6 +86,4 @@ void deinit(Obj o) {
     }
 }
 
-void finalize() {
-    deinit(reg);
-}
+void finalize() {}

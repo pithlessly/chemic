@@ -44,7 +44,7 @@ type op =
   | Minus
   | Times
   | Len
-  | Register
+  | Print
 
 type form =
   | Int of int64
@@ -87,7 +87,7 @@ let rec parse_op state: op * state =
   | Some '-' -> make_op Minus
   | Some '*' -> make_op Times
   | Some ',' -> make_op Len
-  | Some '@' -> make_op Register
+  | Some '.' -> make_op Print
   | Some c when is_space c -> parse_op (advance state)
   | Some c -> fail state (Printf.sprintf "invalid operator: '%s'" (Char.escaped c))
   | None -> fail state "expected operator, got EOF"

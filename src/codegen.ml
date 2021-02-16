@@ -3,7 +3,7 @@ type op = Parse.op =
   | Minus
   | Times
   | Len
-  | Register
+  | Print
 
 type form = Parse.form =
   | Int of int64
@@ -108,17 +108,15 @@ let rec write_form ~vctx ~var = function
   | Op (Len, [x]) ->
     unary_fun ~vctx ~var ~name:"len" x
 
-  | Op (Register, []) ->
-    fun buf -> bprintf buf "%t=reg_restore();" (Var.write var)
-  | Op (Register, [x]) ->
+  | Op (Print, [x]) ->
     let form = write_form x ~vctx ~var in
     fun buf ->
       form buf;
-      bprintf buf "reg_save(%t);" (Var.write var)
+      bprintf buf "print(%t);" (Var.write var)
 
   | Op (Minus, [])
   | Op (Len, _)
-  | Op (Register, _) ->
+  | Op (Print, _) ->
     raise (Invalid_argument "invalid expression")
 
 (* Helper function to construct a writer which emits code to evaluate a function's
@@ -163,8 +161,7 @@ let gen_code forms =
   (* emit program statements *)
   form_writers |> List.iter (fun writer ->
       writer buf;
-      let v = Var.write (Var.zero vctx) in
-      bprintf buf "print(%t);deinit(%t);\n" v v;
+      bprintf buf "deinit(%t);\n" (Var.write (Var.zero vctx))
     );
   Buffer.add_string buf "finalize();return 0;}\n";
   Buffer.contents buf

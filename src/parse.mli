@@ -3,7 +3,7 @@ type op =
   | Minus
   | Times
   | Len
-  | Register
+  | Print
 
 type form =
   | Int of int64

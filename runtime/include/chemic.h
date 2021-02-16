@@ -77,7 +77,7 @@ extern Obj mul(Obj a, Obj b);
 extern Obj len(Obj a);
 extern void deinit(Obj a);
 // does not take ownership of its argument
-extern void print(Obj a);
+extern void display(Obj a);
 
 extern void finalize();
 

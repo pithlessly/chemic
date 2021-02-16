@@ -156,7 +156,7 @@ let write_form ~gctx ~vctx =
 
     | Op (Print, [x]) ->
       let form = go ~var x in
-      fun buf -> bprintf buf "%tprint(%t);" form (Var.write var)
+      fun buf -> bprintf buf "%tdisplay(%t);" form (Var.write var)
 
     | Ident i ->
       raise (Invalid_argument (Printf.sprintf "variables not yet supported: '%s'"

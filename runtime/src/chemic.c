@@ -70,17 +70,16 @@ static void copy(Obj a) {
     }
 }
 
-void print(Obj a) {
+void display(Obj a) {
     switch (a.tag) {
         case tag_nil:
-            puts("()");
+            fputs("()", stdout);
             break;
         case tag_int:
-            printf("%" PRId64 "\n", a.data.i);
+            printf("%" PRId64, a.data.i);
             break;
         case tag_str:
             fwrite(&a.data.s->data, sizeof(uint8_t), a.data.s->len, stdout);
-            putchar('\n');
             break;
     }
 }

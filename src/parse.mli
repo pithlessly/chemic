@@ -5,6 +5,7 @@ type op =
   | Len
   | Print
   | Define
+  | Cons
 
 type form =
   | Int of int64

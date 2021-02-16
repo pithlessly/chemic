@@ -53,6 +53,7 @@ type op =
   | Len
   | Print
   | Define
+  | Cons
 
 type form =
   | Int of int64
@@ -120,6 +121,7 @@ let parse_op state: op * state =
     | Ident "len" -> Len
     | Ident "display" -> Print
     | Ident "define" -> Define
+    | Ident "cons" -> Cons
     | Ident s ->
       fail state (Printf.sprintf "invalid operator: \"%s\"" (String.escaped s))
     | _ ->

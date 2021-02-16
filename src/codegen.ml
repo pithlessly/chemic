@@ -5,6 +5,7 @@ type op = Parse.op =
   | Len
   | Print
   | Define
+  | Cons
 
 type form = Parse.form =
   | Int of int64
@@ -215,6 +216,11 @@ let write_form ~gctx ~vctx =
       let str = Global.create_string gctx s in
       fun buf -> bprintf buf "MAKE_STRING(%t,%t);" (Var.write var) str
 
+    | Ident i ->
+      let prelude, ident = Global.access_var gctx i in
+      fun buf ->
+        bprintf buf "%t%t=%t;" prelude (Var.write var) ident
+
     | Op (Plus, []) -> fun buf ->
       bprintf buf "MAKE_INT(%t,0);" (Var.write var)
     | Op (Plus, lhs :: rhss) ->
@@ -244,15 +250,15 @@ let write_form ~gctx ~vctx =
         bprintf buf "%t%t%t=%t;MAKE_NIL(%t);"
           form prelude ident (Var.write var) (Var.write var)
 
-    | Ident i ->
-      let prelude, ident = Global.access_var gctx i in
-      fun buf ->
-        bprintf buf "%t%t=%t;" prelude (Var.write var) ident
+    | Op (Cons, [a; b]) ->
+      let v_rhs = Var.next vctx var in
+      binary_fun ~var ~v_rhs ~name:"cons" (go ~var a) b
 
     | Op (Minus, [])
     | Op (Len, _)
     | Op (Print, _)
-    | Op (Define, _) ->
+    | Op (Define, _)
+    | Op (Cons, _) ->
       raise (Invalid_argument "invalid expression")
 
   (* Helper function to construct a writer which emits code to evaluate a function's
@@ -261,22 +267,30 @@ let write_form ~gctx ~vctx =
     let form = go ~var form in
     fun buf -> bprintf buf "%t%t=%s(%t);" form (Var.write var) name (Var.write var)
 
+  (* Helper function which takes a writer emitting code to evaluate a function's first
+   * argument to 'var', then a form to evaluate and store to 'v_rhs', and returns a
+   * writer emiting code that evaluates a two-argument function and stores the result
+   * to 'var'. *)
+  and binary_fun ~var ~v_rhs ~name lhs form_rhs =
+    let rhs = go ~var:v_rhs form_rhs in
+    fun buf ->
+      bprintf buf "%t%t%t=%s(%t,%t);"
+        lhs
+        rhs
+        (Var.write var)
+        name
+        (Var.write var)
+        (Var.write v_rhs)
+
   (* Helper function to construct a writer which emits code to evaluate a sequence
    * of arguments and combine them with repeated calls to a 2-argument function,
    * assigning the final result to the given variable. *)
   and write_fold_fun ~var ~name lhs rhss =
     let v_rhs = Var.next vctx var in
-    List.fold_left (fun lhs rhs ->
-        let rhs = go ~var:v_rhs rhs in
-        fun buf ->
-          bprintf buf "%t%t%t=%s(%t,%t);"
-            lhs
-            rhs
-            (Var.write var)
-            name
-            (Var.write var)
-            (Var.write v_rhs)
-      ) (go ~var lhs) rhss
+    List.fold_left
+      (fun lhs rhs -> binary_fun ~var ~v_rhs ~name lhs rhs)
+      (go ~var lhs)
+      rhss
 
   in go
 

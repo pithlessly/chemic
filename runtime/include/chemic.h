@@ -5,10 +5,11 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdint.h>
 
 /*= type definitions =*/
 
-typedef enum { tag_nil, tag_int, tag_str } Tag;
+typedef enum { tag_nil, tag_int, tag_str, tag_cons } Tag;
 
 typedef struct {
     size_t len;
@@ -18,13 +19,21 @@ typedef struct {
     uint8_t data[];
 } Str;
 
+struct Cons_s;
+
 typedef struct {
     Tag tag;
     union {
         int64_t i;
         Str *s;
+        struct Cons_s *c;
     } data;
 } Obj;
+
+typedef struct Cons_s {
+    Obj car;
+    Obj cdr;
+} Cons;
 
 /*= macros/inline functions =*/
 
@@ -33,6 +42,7 @@ inline static char const* classify(Tag t) {
         case tag_nil: return "nil";
         case tag_int: return "int";
         case tag_str: return "string";
+        case tag_cons: return "cons";
     }
 }
 
@@ -77,6 +87,7 @@ extern Obj sub(Obj a, Obj b);
 extern Obj neg(Obj a);
 extern Obj mul(Obj a, Obj b);
 extern Obj len(Obj a);
+extern Obj cons(Obj a, Obj b);
 extern void deinit(Obj a);
 // do not take ownership of their argument
 extern void clone(Obj a);

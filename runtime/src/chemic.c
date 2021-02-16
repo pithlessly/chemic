@@ -50,7 +50,7 @@ Obj mul(Obj a, Obj b) {
 Obj len(Obj a) {
     EXPECT(a, tag_str, "str");
     size_t len = a.data.s->len;
-    kill(a);
+    deinit(a);
     MAKE_INT(a, len);
     return a;
 }
@@ -77,7 +77,7 @@ static Obj copy(Obj a) {
 static Obj reg = {.tag = tag_int, .data = {.i = 1234}};
 
 void reg_save(Obj a) {
-    kill(reg);
+    deinit(reg);
     reg = copy(a);
 }
 
@@ -97,12 +97,12 @@ void print(Obj a) {
     }
 }
 
-void kill(Obj o) {
+void deinit(Obj o) {
     if (o.tag == tag_str) {
         free(o.data.s);
     }
 }
 
 void finalize() {
-    kill(reg);
+    deinit(reg);
 }

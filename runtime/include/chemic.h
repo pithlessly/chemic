@@ -36,7 +36,7 @@ typedef struct {
 
 #define EXPECT(T, Tag, Name) \
     if (T.tag != Tag) { \
-        kill(T); \
+        deinit(T); \
         DIE("expected " Name); \
     } else (void) 0
 
@@ -67,7 +67,7 @@ extern void reg_save(Obj a);
 extern Obj reg_restore();
 
 extern void print(Obj a);
-extern void kill(Obj a);
+extern void deinit(Obj a);
 
 extern void finalize();
 

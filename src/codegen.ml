@@ -147,7 +147,7 @@ let gen_code forms =
   form_writers |> List.iter (fun writer ->
       writer buf;
       let v = Var.write var in
-      bprintf buf "print(%t);kill(%t);\n" v v;
+      bprintf buf "print(%t);deinit(%t);\n" v v;
     );
   Buffer.add_string buf "finalize();return 0;}\n";
   Buffer.contents buf

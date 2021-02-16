@@ -75,6 +75,7 @@ void print(Obj a) {
     switch (a.tag) {
         case tag_nil:
             puts("()");
+            break;
         case tag_int:
             printf("%" PRId64 "\n", a.data.i);
             break;

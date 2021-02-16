@@ -1,7 +1,6 @@
 #include "chemic.h"
 
-#include <stdio.h>
-#include <stdlib.h>
+#include <inttypes.h>
 
 #define I64_MIN (~9223372036854775807)
 

@@ -22,6 +22,33 @@ let seq_init (n: int) (f: int -> 'a): 'a Seq.t =
       Seq.Nil
   in loop 0
 
+(* Map a function over a sequence with access to the index. *)
+let seq_mapi f seq =
+  let rec loop i seq () =
+    match seq () with
+    | Seq.Nil -> Seq.Nil
+    | Seq.Cons (x, xs) -> Seq.Cons (f i x, loop (i + 1) xs)
+  in loop 0 seq
+
+(* Encode a string to the buffer as a C string literal *)
+let write_string_literal s buf =
+  let len = String.length s in
+  let rec loop n =
+    if n < len then (
+      let c = String.get s n in
+      if ' ' <= c && c <= '~' then (
+        if c = '\\' || c = '"' then
+          Buffer.add_char buf '\\';
+        Buffer.add_char buf c
+      ) else
+        bprintf buf "\\%02x" (Char.code c);
+      loop (n + 1)
+    )
+  in
+  Buffer.add_char buf '"';
+  loop 0;
+  Buffer.add_char buf '"'
+
 module Var: sig
   (* tracks information related to generated variables *)
   type ctx
@@ -59,57 +86,74 @@ end = struct
       Writer.empty
 end
 
-let write_string_literal s buf =
-  let len = String.length s in
-  let rec loop n =
-    if n < len then (
-      let c = String.get s n in
-      if ' ' <= c && c <= '~' then (
-        if c = '\\' || c = '"' then
-          Buffer.add_char buf '\\';
-        Buffer.add_char buf c
-      ) else
-        bprintf buf "\\%02x" (Char.code c);
-      loop (n + 1)
-    )
-  in
-  Buffer.add_char buf '"';
-  loop 0;
-  Buffer.add_char buf '"'
+module Global: sig
+  (* keeps track of global program information *)
+  type ctx
+
+  val init: unit -> ctx
+  val create_string: ctx -> string -> Writer.t
+  val write_ctx: ctx -> Writer.t
+end = struct
+  type ctx = (int * string list) ref
+
+  let init () = ref (0, [])
+
+  let create_string ctx s =
+    let i, lits = !ctx in
+    ctx := (i + 1, s :: lits);
+    fun buf -> bprintf buf "&STR%d" i
+
+  let write_ctx ctx =
+    let len, lits = !ctx in
+    if len > 0 then
+      let decls =
+        List.rev lits
+        |> List.to_seq
+        |> seq_mapi (fun i lit ->
+            fun buf ->
+              bprintf buf "STR%d={%d,0,%t}"
+                i (* len *)
+                (String.length lit) (* ref_count *)
+                (write_string_literal lit) (* data *)
+          )
+        |> Writer.join ','
+      in
+      fun buf -> bprintf buf "Str %t;\n" decls
+    else
+      Writer.empty
+end
 
 (* Return a Writer.t that emits a sequence of statements which have the
  * effect of evaluating the given form and assigning the return value
  * to the given variable. *)
-let rec write_form ~vctx ~var = function
+let rec write_form ~gctx ~vctx ~var = function
   | Int i -> fun buf ->
     bprintf buf "MAKE_INT(%t,%Ld);" (Var.write var) i
 
-  | String s -> fun buf ->
-    bprintf buf "MAKE_STRING(%t,%t,%d);"
-      (Var.write var)
-      (write_string_literal s)
-      (String.length s)
+  | String s ->
+    let str = Global.create_string gctx s in
+    fun buf -> bprintf buf "MAKE_STRING(%t,%t);" (Var.write var) str
 
   | Op (Plus, []) -> fun buf ->
     bprintf buf "MAKE_INT(%t,0);" (Var.write var)
   | Op (Plus, lhs :: rhss) ->
-    write_fold_fun ~vctx ~var ~name:"add" lhs rhss
+    write_fold_fun ~gctx ~vctx ~var ~name:"add" lhs rhss
 
   | Op (Minus, [x]) ->
-    unary_fun ~vctx ~var ~name:"neg" x
+    unary_fun ~gctx ~vctx ~var ~name:"neg" x
   | Op (Minus, lhs :: rhss) ->
-    write_fold_fun ~vctx ~var ~name:"sub" lhs rhss
+    write_fold_fun ~gctx ~vctx ~var ~name:"sub" lhs rhss
 
   | Op (Times, []) -> fun buf ->
     bprintf buf "MAKE_INT(%t,1);" (Var.write var)
   | Op (Times, lhs :: rhss) ->
-    write_fold_fun ~vctx ~var ~name:"mul" lhs rhss
+    write_fold_fun ~gctx ~vctx ~var ~name:"mul" lhs rhss
 
   | Op (Len, [x]) ->
-    unary_fun ~vctx ~var ~name:"len" x
+    unary_fun ~gctx ~vctx ~var ~name:"len" x
 
   | Op (Print, [x]) ->
-    let form = write_form x ~vctx ~var in
+    let form = write_form ~gctx ~vctx ~var x in
     fun buf ->
       form buf;
       bprintf buf "print(%t);" (Var.write var)
@@ -121,8 +165,8 @@ let rec write_form ~vctx ~var = function
 
 (* Helper function to construct a writer which emits code to evaluate a function's
  * argument and then call it, assigning its result to the given variable. *)
-and unary_fun ~vctx ~var ~name form =
-  let form = write_form form ~vctx ~var in
+and unary_fun ~gctx ~vctx ~var ~name form =
+  let form = write_form form ~gctx ~vctx ~var in
   fun buf ->
     form buf;
     bprintf buf "%t=%s(%t);" (Var.write var) name (Var.write var)
@@ -130,10 +174,10 @@ and unary_fun ~vctx ~var ~name form =
 (* Helper function to construct a writer which emits code to evaluate a sequence
  * of arguments and combine them with repeated calls to a 2-argument function,
  * assigning the final result to the given variable. *)
-and write_fold_fun ~vctx ~var ~name lhs rhss =
+and write_fold_fun ~gctx ~vctx ~var ~name lhs rhss =
   let v_rhs = Var.next vctx var in
   List.fold_left (fun lhs rhs ->
-      let rhs = write_form rhs ~vctx ~var:v_rhs in
+      let rhs = write_form rhs ~gctx ~vctx ~var:v_rhs in
       fun buf ->
         lhs buf;
         rhs buf;
@@ -142,20 +186,22 @@ and write_fold_fun ~vctx ~var ~name lhs rhss =
           name
           (Var.write var)
           (Var.write v_rhs)
-    ) (write_form lhs ~vctx ~var) rhss
+    ) (write_form lhs ~gctx ~vctx ~var) rhss
 
 (* Convert a form into a C program. *)
 let gen_code forms =
+  let gctx = Global.init () in
   let vctx = Var.init () in
   let buf = Buffer.create 2048 in
-  Buffer.add_string buf "#include \"chemic.h\"\n";
-  Buffer.add_string buf "int main(){\n";
   (* compute each form, but do not write it yet
    * (to allow vctx to be updated) *)
   let form_writers = List.map (fun form ->
       let var = Var.zero vctx in
-      write_form ~vctx ~var form
+      write_form ~gctx ~vctx ~var form
     ) forms in
+  Buffer.add_string buf "#include \"chemic.h\"\n";
+  Global.write_ctx gctx buf;
+  Buffer.add_string buf "int main(){\n";
   (* emit declaration of necessary variables *)
   Var.write_ctx vctx buf;
   (* emit program statements *)

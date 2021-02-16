@@ -5,9 +5,6 @@
 
 #include <stdio.h>
 #include <stdlib.h>
-#include <stddef.h>
-#include <inttypes.h>
-#include <string.h>
 
 /*= type definitions =*/
 
@@ -64,14 +61,10 @@ inline static char const* classify(Tag t) {
         T.data.i = I; \
     } else (void) 0
 
-#define MAKE_STRING(T, S, LEN) \
+#define MAKE_STRING(T, S) \
     if (1) { \
         T.tag = tag_str; \
-        T.data.s = malloc(sizeof(Str) + LEN); \
-        if (!T.data.s) { DIE("out of memory"); } \
-        T.data.s->len = LEN; \
-        T.data.s->ref_count = 1; \
-        memcpy(&T.data.s->data, S, LEN); \
+        T.data.s = S; \
     } else (void) 0
 
 /*= external functions =*/

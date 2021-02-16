@@ -46,20 +46,11 @@ let fail { pos; _ } msg = raise (Parse_error (pos, msg))
 
 (* types for representing a parsed program *)
 
-type op =
-  | Plus
-  | Minus
-  | Times
-  | Len
-  | Print
-  | Define
-  | Cons
-
 type form =
   | Int of int64
   | String of string
   | Ident of string
-  | Op of op * form list
+  | List of form list
 
 (* incremental parsing functions which return the new state *)
 
@@ -112,22 +103,6 @@ let parse_string state: string * state =
   let state = loop false state in
   (Buffer.contents chars, state)
 
-let parse_op state: op * state =
-  let id, state = parse_ident_like (skip_whitespace state) in
-  let op = match id with
-    | Ident "+" -> Plus
-    | Ident "-" -> Minus
-    | Ident "*" -> Times
-    | Ident "len" -> Len
-    | Ident "display" -> Print
-    | Ident "define" -> Define
-    | Ident "cons" -> Cons
-    | Ident s ->
-      fail state (Printf.sprintf "invalid operator: \"%s\"" (String.escaped s))
-    | _ ->
-      fail state "expected operator, got number"
-  in (op, state)
-
 let rec try_parse ~(top_level: bool) state: form option * state =
   let state = skip_whitespace state in
   match current_char state with
@@ -140,9 +115,8 @@ let rec try_parse ~(top_level: bool) state: form option * state =
     then fail state "expected form, got )"
     else (None, advance state)
   | Some '(' ->
-    let op, state = parse_op (advance state) in
-    let args, state = parse_many ~top_level:false state in
-    (Some (Op (op, args)), state)
+    let children, state = parse_many ~top_level:false (advance state) in
+    (Some (List children), state)
   | Some '"' ->
     let s, state = parse_string (advance state) in
     (Some (String s), state)

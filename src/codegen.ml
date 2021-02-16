@@ -126,67 +126,66 @@ end
 (* Return a Writer.t that emits a sequence of statements which have the
  * effect of evaluating the given form and assigning the return value
  * to the given variable. *)
-let rec write_form ~gctx ~vctx ~var = function
-  | Int i -> fun buf ->
-    bprintf buf "MAKE_INT(%t,%Ld);" (Var.write var) i
+let write_form ~gctx ~vctx =
+  let rec go ~var = function
+    | Int i -> fun buf ->
+      bprintf buf "MAKE_INT(%t,%Ld);" (Var.write var) i
 
-  | String s ->
-    let str = Global.create_string gctx s in
-    fun buf -> bprintf buf "MAKE_STRING(%t,%t);" (Var.write var) str
+    | String s ->
+      let str = Global.create_string gctx s in
+      fun buf -> bprintf buf "MAKE_STRING(%t,%t);" (Var.write var) str
 
-  | Op (Plus, []) -> fun buf ->
-    bprintf buf "MAKE_INT(%t,0);" (Var.write var)
-  | Op (Plus, lhs :: rhss) ->
-    write_fold_fun ~gctx ~vctx ~var ~name:"add" lhs rhss
+    | Op (Plus, []) -> fun buf ->
+      bprintf buf "MAKE_INT(%t,0);" (Var.write var)
+    | Op (Plus, lhs :: rhss) ->
+      write_fold_fun ~var ~name:"add" lhs rhss
 
-  | Op (Minus, [x]) ->
-    unary_fun ~gctx ~vctx ~var ~name:"neg" x
-  | Op (Minus, lhs :: rhss) ->
-    write_fold_fun ~gctx ~vctx ~var ~name:"sub" lhs rhss
+    | Op (Minus, [x]) ->
+      unary_fun ~var ~name:"neg" x
+    | Op (Minus, lhs :: rhss) ->
+      write_fold_fun ~var ~name:"sub" lhs rhss
 
-  | Op (Times, []) -> fun buf ->
-    bprintf buf "MAKE_INT(%t,1);" (Var.write var)
-  | Op (Times, lhs :: rhss) ->
-    write_fold_fun ~gctx ~vctx ~var ~name:"mul" lhs rhss
+    | Op (Times, []) -> fun buf ->
+      bprintf buf "MAKE_INT(%t,1);" (Var.write var)
+    | Op (Times, lhs :: rhss) ->
+      write_fold_fun ~var ~name:"mul" lhs rhss
 
-  | Op (Len, [x]) ->
-    unary_fun ~gctx ~vctx ~var ~name:"len" x
+    | Op (Len, [x]) ->
+      unary_fun ~var ~name:"len" x
 
-  | Op (Print, [x]) ->
-    let form = write_form ~gctx ~vctx ~var x in
-    fun buf ->
-      form buf;
-      bprintf buf "print(%t);" (Var.write var)
+    | Op (Print, [x]) ->
+      let form = go ~var x in
+      fun buf -> bprintf buf "%tprint(%t);" form (Var.write var)
 
-  | Op (Minus, [])
-  | Op (Len, _)
-  | Op (Print, _) ->
-    raise (Invalid_argument "invalid expression")
+    | Op (Minus, [])
+    | Op (Len, _)
+    | Op (Print, _) ->
+      raise (Invalid_argument "invalid expression")
 
-(* Helper function to construct a writer which emits code to evaluate a function's
- * argument and then call it, assigning its result to the given variable. *)
-and unary_fun ~gctx ~vctx ~var ~name form =
-  let form = write_form form ~gctx ~vctx ~var in
-  fun buf ->
-    form buf;
-    bprintf buf "%t=%s(%t);" (Var.write var) name (Var.write var)
+  (* Helper function to construct a writer which emits code to evaluate a function's
+   * argument and then call it, assigning its result to the given variable. *)
+  and unary_fun ~var ~name form =
+    let form = go ~var form in
+    fun buf -> bprintf buf "%t%t=%s(%t);" form (Var.write var) name (Var.write var)
 
-(* Helper function to construct a writer which emits code to evaluate a sequence
- * of arguments and combine them with repeated calls to a 2-argument function,
- * assigning the final result to the given variable. *)
-and write_fold_fun ~gctx ~vctx ~var ~name lhs rhss =
-  let v_rhs = Var.next vctx var in
-  List.fold_left (fun lhs rhs ->
-      let rhs = write_form rhs ~gctx ~vctx ~var:v_rhs in
-      fun buf ->
-        lhs buf;
-        rhs buf;
-        bprintf buf "%t=%s(%t,%t);"
-          (Var.write var)
-          name
-          (Var.write var)
-          (Var.write v_rhs)
-    ) (write_form lhs ~gctx ~vctx ~var) rhss
+  (* Helper function to construct a writer which emits code to evaluate a sequence
+   * of arguments and combine them with repeated calls to a 2-argument function,
+   * assigning the final result to the given variable. *)
+  and write_fold_fun ~var ~name lhs rhss =
+    let v_rhs = Var.next vctx var in
+    List.fold_left (fun lhs rhs ->
+        let rhs = go ~var:v_rhs rhs in
+        fun buf ->
+          bprintf buf "%t%t%t=%s(%t,%t);"
+            lhs
+            rhs
+            (Var.write var)
+            name
+            (Var.write var)
+            (Var.write v_rhs)
+      ) (go ~var lhs) rhss
+
+  in go
 
 (* Convert a form into a C program. *)
 let gen_code forms =

@@ -18,6 +18,7 @@ let is_digit c =
   '0' <= c && c <= '9'
 
 let is_ident c =
+  is_digit c ||
   ('a' <= c && c <= 'z') ||
   ('A' <= c && c <= 'Z') ||
   List.mem c ['!'; '$'; '%'; '&'; '*'; '/'; ':'; '<'; '=';
@@ -66,31 +67,28 @@ let rec skip_whitespace state: state =
     skip_whitespace (advance state)
   | _ -> state
 
-let parse_num state: int64 * state =
-  let digits = Buffer.create max_literal_len in
-  let rec loop state =
-    match current_char state with
-    | Some c when is_digit c ->
-      Buffer.add_char digits c;
-      loop (advance state)
-    | _ -> state
-  in
-  let state = loop state in
-  match digits |> Buffer.contents |> Int64.of_string_opt with
-  | Some n -> (n, state)
-  | None -> fail state "integer literal too large"
-
-let parse_ident state: string * state =
+let parse_ident_like state: form * state =
   let chars = Buffer.create max_literal_len in
+  let numeric = ref true in
   let rec loop state =
     match current_char state with
-    | Some c when is_ident c || is_digit c ->
+    | Some c when is_ident c ->
+      if not (is_digit c) then
+        numeric := false;
       Buffer.add_char chars c;
       loop (advance state)
     | _ -> state
   in
   let state = loop state in
-  (Buffer.contents chars, state)
+  let chars = Buffer.contents chars in
+  if String.length chars = 0 then
+    fail state "expected identifier, got EOF"
+  else if not !numeric then
+    (Ident chars, state)
+  else
+    match Int64.of_string_opt chars with
+    | Some n -> (Int n, state)
+    | None -> fail state "integer literal too large"
 
 let parse_string state: string * state =
   let chars = Buffer.create max_literal_len in
@@ -106,15 +104,17 @@ let parse_string state: string * state =
   (Buffer.contents chars, advance state)
 
 let parse_op state: op * state =
-  let id, state = parse_ident (skip_whitespace state) in
+  let id, state = parse_ident_like (skip_whitespace state) in
   let op = match id with
-    | "+" -> Plus
-    | "-" -> Minus
-    | "*" -> Times
-    | "len" -> Len
-    | "display" -> Print
-    | "" -> fail state "expected operator, got EOF"
-    | s -> fail state (Printf.sprintf "invalid operator: \"%s\"" (String.escaped s))
+    | Ident "+" -> Plus
+    | Ident "-" -> Minus
+    | Ident "*" -> Times
+    | Ident "len" -> Len
+    | Ident "display" -> Print
+    | Ident s ->
+      fail state (Printf.sprintf "invalid operator: \"%s\"" (String.escaped s))
+    | _ ->
+      fail state "expected operator, got number"
   in (op, state)
 
 let rec try_parse ~(top_level: bool) state: form option * state =
@@ -135,12 +135,9 @@ let rec try_parse ~(top_level: bool) state: form option * state =
   | Some '"' ->
     let s, state = parse_string (advance state) in
     (Some (String s), state)
-  | Some c when is_digit c ->
-    let n, state = parse_num state in
-    (Some (Int n), state)
   | Some c when is_ident c ->
-    let id, state = parse_ident state in
-    (Some (Ident id), state)
+    let form, state = parse_ident_like state in
+    (Some form, state)
   | Some c -> fail state (Printf.sprintf "unrecognized character '%s'"
                             (Char.escaped c))
 

@@ -158,7 +158,10 @@ let write_form ~gctx ~vctx =
       let form = go ~var x in
       fun buf -> bprintf buf "%tprint(%t);" form (Var.write var)
 
-    | Ident _
+    | Ident i ->
+      raise (Invalid_argument (Printf.sprintf "variables not yet supported: '%s'"
+                                 (String.escaped i)))
+
     | Op (Minus, [])
     | Op (Len, _)
     | Op (Print, _) ->

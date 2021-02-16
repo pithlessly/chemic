@@ -67,6 +67,8 @@ inline static char const* classify(Tag t) {
         T.data.s = S; \
     } else (void) 0
 
+#define MAKE_NIL(T) T.tag = tag_nil
+
 /*= external functions =*/
 
 // take & return ownership of their arguments
@@ -76,7 +78,8 @@ extern Obj neg(Obj a);
 extern Obj mul(Obj a, Obj b);
 extern Obj len(Obj a);
 extern void deinit(Obj a);
-// does not take ownership of its argument
+// do not take ownership of their argument
+extern void clone(Obj a);
 extern void display(Obj a);
 
 extern void finalize();

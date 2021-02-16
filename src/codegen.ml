@@ -4,6 +4,7 @@ type op = Parse.op =
   | Times
   | Len
   | Print
+  | Define
 
 type form = Parse.form =
   | Int of int64
@@ -92,36 +93,114 @@ module Global: sig
   type ctx
 
   val init: unit -> ctx
-  val create_string: ctx -> string -> Writer.t
-  val write_ctx: ctx -> Writer.t
-end = struct
-  type ctx = (int * string list) ref
 
-  let init () = ref (0, [])
+  (* return a writer that emits an identifier that can be used to access the given string *)
+  val create_string: ctx -> string -> Writer.t
+
+  (* return a pair of writers that emit:
+   * - a series of statements
+   * - an identifier that, after those statements have been executed,
+   *   can be assigned to in order to modify the desired variable
+   *)
+  val assign_var: ctx -> string -> Writer.t * Writer.t
+
+  (* return a pair of writers that emit:
+   * - a series of statements
+   * - an identifier that, after those statements have been executed,
+   *   contains the desired variable
+   *)
+  val access_var: ctx -> string -> Writer.t * Writer.t
+
+  (* return a pair of writers that emit statements that should be placed at the start and
+   * end of the program to initialize and deinitialize the context *)
+  val write_ctx: ctx -> Writer.t * Writer.t
+
+end = struct
+  module StringMap = Map.Make(String)
+
+  type ctx = {
+    mutable string_literals: string list;
+    (* should be the same as 'List.length string_literals' *)
+    mutable num_strings: int;
+    mutable var_idxs: int StringMap.t;
+  }
+
+  let init () = {
+    string_literals = [];
+    num_strings = 0;
+    var_idxs = StringMap.empty;
+  }
 
   let create_string ctx s =
-    let i, lits = !ctx in
-    ctx := (i + 1, s :: lits);
-    fun buf -> bprintf buf "&STR%d" i
+    let idx = ctx.num_strings in
+    ctx.string_literals <- s :: ctx.string_literals;
+    ctx.num_strings <- idx + 1;
+    fun buf -> bprintf buf "&STR%d" idx
+
+  let global_var idx = fun buf -> bprintf buf "GLO%d" idx
+
+  let assign_var ctx name =
+    (* NOTE: the naive approach used here of "don't deinitialize a variable
+     * the first time it's been assigned to" doesn't work in the presence of
+     * any nonlinear control flow (procedures, conditionals, loops, etc.) *)
+    match StringMap.find_opt name ctx.var_idxs with
+    | Some idx ->
+      let var = global_var idx in
+      ((fun buf -> bprintf buf "deinit(%t);" var), var)
+    | None ->
+      let new_idx = StringMap.cardinal ctx.var_idxs in
+      ctx.var_idxs <- StringMap.add name new_idx ctx.var_idxs;
+      (Writer.empty, global_var new_idx)
+
+  let access_var ctx name =
+    match StringMap.find_opt name ctx.var_idxs with
+    | Some idx ->
+      let var = global_var idx in
+      ((fun buf -> bprintf buf "clone(%t);" var), var)
+    | None ->
+      raise (Invalid_argument (Printf.sprintf "undefined variable: '%s'" name))
 
   let write_ctx ctx =
-    let len, lits = !ctx in
-    if len > 0 then
-      let decls =
-        List.rev lits
-        |> List.to_seq
-        |> seq_mapi (fun i lit ->
-            fun buf ->
-              bprintf buf "STR%d={%d,0,%t}"
-                i (* len *)
-                (String.length lit) (* ref_count *)
-                (write_string_literal lit) (* data *)
-          )
-        |> Writer.join ','
-      in
-      fun buf -> bprintf buf "Str %t;\n" decls
-    else
-      Writer.empty
+
+    (* declarations of strings
+     * (e.g. 'Str STR0={...},STR1={...},...;') *)
+    let string_decls =
+      if ctx.num_strings = 0 then
+        Writer.empty
+      else
+        let decls =
+          List.rev ctx.string_literals
+          |> List.to_seq
+          |> seq_mapi (fun i lit ->
+              fun buf ->
+                bprintf buf "STR%d={%d,0,%t}"
+                  i (* len *)
+                  (String.length lit) (* ref_count *)
+                  (write_string_literal lit) (* data *)
+            )
+          |> Writer.join ','
+        in
+        fun buf -> bprintf buf "Str %t;\n" decls
+    in
+
+    let num_vars = StringMap.cardinal ctx.var_idxs in
+    (* declarations of variables *)
+    let var_decls =
+      if num_vars = 0 then
+        Writer.empty
+      else
+        let decls = Writer.join ',' (seq_init num_vars global_var) in
+        fun buf -> bprintf buf "Obj %t;\n" decls
+    in
+
+    let deinits =
+      fun buf ->
+        for i = 0 to num_vars - 1 do
+          bprintf buf "deinit(%t);" (global_var i);
+        done
+    in
+        
+    ((fun buf -> string_decls buf; var_decls buf), deinits)
 end
 
 (* Return a Writer.t that emits a sequence of statements which have the
@@ -158,13 +237,22 @@ let write_form ~gctx ~vctx =
       let form = go ~var x in
       fun buf -> bprintf buf "%tdisplay(%t);" form (Var.write var)
 
+    | Op (Define, [Ident i; x]) ->
+      let form = go ~var x in
+      let prelude, ident = Global.assign_var gctx i in
+      fun buf ->
+        bprintf buf "%t%t%t=%t;MAKE_NIL(%t);"
+          form prelude ident (Var.write var) (Var.write var)
+
     | Ident i ->
-      raise (Invalid_argument (Printf.sprintf "variables not yet supported: '%s'"
-                                 (String.escaped i)))
+      let prelude, ident = Global.access_var gctx i in
+      fun buf ->
+        bprintf buf "%t%t=%t;" prelude (Var.write var) ident
 
     | Op (Minus, [])
     | Op (Len, _)
-    | Op (Print, _) ->
+    | Op (Print, _)
+    | Op (Define, _) ->
       raise (Invalid_argument "invalid expression")
 
   (* Helper function to construct a writer which emits code to evaluate a function's
@@ -203,8 +291,9 @@ let gen_code forms =
       let var = Var.zero vctx in
       write_form ~gctx ~vctx ~var form
     ) forms in
+  let init_globals, deinit_globals = Global.write_ctx gctx in
   Buffer.add_string buf "#include \"chemic.h\"\n";
-  Global.write_ctx gctx buf;
+  init_globals buf;
   Buffer.add_string buf "int main(){\n";
   (* emit declaration of necessary variables *)
   Var.write_ctx vctx buf;
@@ -213,5 +302,6 @@ let gen_code forms =
       writer buf;
       bprintf buf "deinit(%t);\n" (Var.write (Var.zero vctx))
     );
+  deinit_globals buf;
   Buffer.add_string buf "finalize();return 0;}\n";
   Buffer.contents buf

@@ -4,6 +4,7 @@ type op =
   | Times
   | Len
   | Print
+  | Define
 
 type form =
   | Int of int64

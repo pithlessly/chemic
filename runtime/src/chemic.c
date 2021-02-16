@@ -57,7 +57,7 @@ inline static void str_del(Str *s) {
     }
 }
 
-static void copy(Obj a) {
+void clone(Obj a) {
     switch (a.tag) {
         case tag_nil:
         case tag_int:

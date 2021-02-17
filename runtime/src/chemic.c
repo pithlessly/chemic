@@ -81,18 +81,20 @@ void clone(Obj a) {
 }
 
 static void display_cons_items(Cons c) {
-    display(c.car);
-    switch (c.cdr.tag) {
-        case tag_cons:
-            putchar(' ');
-            display_cons_items(*c.cdr.data.c);
-            break;
-        case tag_nil:
-            break;
-        default:
-            fputs(" . ", stdout);
-            display(c.cdr);
-            break;
+    while (1) {
+        display(c.car);
+        switch (c.cdr.tag) {
+            case tag_cons:
+                putchar(' ');
+                c = *c.cdr.data.c;
+                break;
+            case tag_nil:
+                return;
+            default:
+                fputs(" . ", stdout);
+                display(c.cdr);
+                return;
+        }
     }
 }
 

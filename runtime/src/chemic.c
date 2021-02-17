@@ -57,6 +57,11 @@ Obj cons(Obj a, Obj b) {
     return a;
 }
 
+Obj call(Obj a) {
+    EXPECT(a, tag_proc);
+    return a.data.p();
+}
+
 inline static void str_del(Str *s) {
     if (s->ref_count > 0) {
         s->ref_count--;
@@ -70,6 +75,7 @@ void clone(Obj a) {
     switch (a.tag) {
         case tag_nil:
         case tag_int:
+        case tag_proc:
         case tag_cons:
             break;
         case tag_str:
@@ -106,6 +112,9 @@ void display(Obj a) {
         case tag_int:
             printf("%" PRId64, a.data.i);
             break;
+        case tag_proc:
+            fputs("#<procedure>", stdout);
+            break;
         case tag_str:
             fwrite(&a.data.s->data, sizeof(uint8_t), a.data.s->len, stdout);
             break;
@@ -121,6 +130,7 @@ void deinit(Obj o) {
     switch (o.tag) {
         case tag_nil:
         case tag_int:
+        case tag_proc:
             break;
         case tag_str:
             str_del(o.data.s);

@@ -1,15 +1,3 @@
-module StringMap = Map.Make(String)
-
-type ctx = {
-  mutable string_literals: string list;
-  (* should be the same as 'List.length string_literals' *)
-  mutable num_strings: int;
-  mutable var_ids: int StringMap.t;
-}
-
-type var_id = int
-type string_id = int
-
 type form = Parse.form =
   | Int of int64
   | String of string
@@ -23,13 +11,31 @@ type op =
   | Len
   | Print
   | Cons
+  | Call
+
+type var_id = int
+type string_id = int
+type proc_id = int
 
 type expr =
   | Int of int64
   | String of string_id
   | Var of var_id
   | Define of var_id * expr
+  | Proc of proc_id
   | Builtin of op * expr list
+
+module StringMap = Map.Make(String)
+
+type ctx = {
+  mutable string_literals: string list;
+  (* should be the same as 'List.length string_literals' *)
+  mutable num_strings: int;
+  mutable procs: expr list list;
+  (* should be the same as 'List.length procs' *)
+  mutable num_procs: int;
+  mutable var_ids: int StringMap.t;
+}
 
 let get_op = function
   | Ident "+" -> Plus
@@ -38,6 +44,7 @@ let get_op = function
   | Ident "len" -> Len
   | Ident "display" -> Print
   | Ident "cons" -> Cons
+  | Ident "call" -> Call
   | Ident s ->
     raise (Invalid_argument (Printf.sprintf "invalid operator: \"%s\""
                                (String.escaped s)))
@@ -56,6 +63,12 @@ let build_with ctx =
           id
       in
       Define (id, go expr)
+
+    | List (Ident "proc" :: body) ->
+      let id = ctx.num_procs in
+      ctx.num_procs <- id + 1;
+      ctx.procs <- List.map go body :: ctx.procs;
+      Proc id
 
     | List (f :: args) ->
       Builtin (get_op f, List.map go args)
@@ -85,6 +98,8 @@ let build_with ctx =
 let build forms =
   let ctx = { string_literals = [];
               num_strings = 0;
+              procs = [];
+              num_procs = 0;
               var_ids = StringMap.empty }
   in
   (ctx, List.map (build_with ctx) forms)
@@ -93,6 +108,9 @@ let bprintf = Printf.bprintf
 
 let write_string id =
   fun buf -> bprintf buf "&STR%d" id
+
+let write_proc id =
+  fun buf -> bprintf buf "&PROC%d" id
 
 let write_var id =
   fun buf -> bprintf buf "GLO%d" id
@@ -105,7 +123,7 @@ let write_assign_var id =
   let var = write_var id in
   ((fun buf -> bprintf buf "deinit(%t);" var), var)
 
-let write_ctx ctx =
+let write_ctx ctx ~write_proc_body =
 
   (* declarations of strings
    * (e.g. 'Str STR0={...},STR1={...},...;') *)
@@ -137,18 +155,29 @@ let write_ctx ctx =
       let decls =
         Utils.seq_init num_vars (fun i ->
             fun buf ->
-              bprintf buf "%t={tag_nil}" (write_var i)
+              bprintf buf "%t=NIL" (write_var i)
           )
         |> Writer.join ','
       in
       fun buf -> bprintf buf "Obj %t;\n" decls
   in
 
+  let procs =
+    fun buf ->
+      ctx.procs |> List.iteri (fun i proc ->
+          bprintf buf "Obj PROC%d() {\n%t}\n"
+            (ctx.num_procs - 1 - i)
+            (write_proc_body proc)
+        );
+  in
+
   let deinits =
     fun buf ->
+      Buffer.add_string buf "  ";
       for i = 0 to num_vars - 1 do
         bprintf buf "deinit(%t);" (write_var i);
-      done
+      done;
+      Buffer.add_char buf '\n';
   in
-      
-  ((fun buf -> string_decls buf; var_decls buf), deinits)
+
+  ((fun buf -> string_decls buf; var_decls buf; procs buf), deinits)

@@ -9,7 +9,7 @@
 
 /*= type definitions =*/
 
-typedef enum { tag_nil, tag_int, tag_str, tag_cons } Tag;
+typedef enum { tag_nil, tag_int, tag_proc, tag_str, tag_cons } Tag;
 
 typedef struct {
     size_t len;
@@ -21,10 +21,11 @@ typedef struct {
 
 struct Cons_s;
 
-typedef struct {
+typedef struct Obj_s {
     Tag tag;
     union {
         int64_t i;
+        struct Obj_s (*p)();
         Str *s;
         struct Cons_s *c;
     } data;
@@ -41,6 +42,7 @@ inline static char const* classify(Tag t) {
     switch (t) {
         case tag_nil: return "nil";
         case tag_int: return "int";
+        case tag_proc: return "procedure";
         case tag_str: return "string";
         case tag_cons: return "cons";
     }
@@ -77,6 +79,13 @@ inline static char const* classify(Tag t) {
         T.data.s = S; \
     } else (void) 0
 
+#define MAKE_PROC(T, P) \
+    if (1) { \
+        T.tag = tag_proc; \
+        T.data.p = P; \
+    } else (void) 0
+
+#define NIL (Obj) {tag_nil}
 #define MAKE_NIL(T) T.tag = tag_nil
 
 /*= external functions =*/
@@ -88,6 +97,7 @@ extern Obj neg(Obj a);
 extern Obj mul(Obj a, Obj b);
 extern Obj len(Obj a);
 extern Obj cons(Obj a, Obj b);
+extern Obj call(Obj a);
 extern void deinit(Obj a);
 // do not take ownership of their argument
 extern void clone(Obj a);

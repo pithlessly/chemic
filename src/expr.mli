@@ -4,6 +4,8 @@ type ctx
 type var_id
 (* a token identifying a string literal *)
 type string_id
+(* a token identifying a procedure literal *)
+type proc_id
 
 type op =
   | Plus
@@ -12,17 +14,20 @@ type op =
   | Len
   | Print
   | Cons
+  | Call
 
 type expr =
   | Int of int64
   | String of string_id
   | Var of var_id
   | Define of var_id * expr
+  | Proc of proc_id
   | Builtin of op * expr list
 
 val build: Parse.form list -> ctx * expr list
 
 val write_string: string_id -> Writer.t
+val write_proc: proc_id -> Writer.t
 (* return a pair of writers that emit:
  * - a series of statements
  * - an identifier that, after those statements have been executed,
@@ -38,4 +43,7 @@ val write_assign_var: var_id -> Writer.t * Writer.t
 
 (* return a pair of writers that emit statements that should be placed at the
  * start and end of the program to initialize and deinitialize the context *)
-val write_ctx: ctx -> Writer.t * Writer.t
+val write_ctx:
+  ctx ->
+  write_proc_body:(expr list -> Writer.t) ->
+  Writer.t * Writer.t

@@ -5,12 +5,14 @@ type op = Expr.op =
   | Len
   | Print
   | Cons
+  | Call
 
 type expr = Expr.expr =
   | Int of int64
   | String of Expr.string_id
   | Var of Expr.var_id
   | Define of Expr.var_id * expr
+  | Proc of Expr.proc_id
   | Builtin of op * expr list
 
 let bprintf = Printf.bprintf
@@ -47,15 +49,15 @@ end = struct
     if !ctx > 0 then
       (* "Obj r0,r1,r2..." *)
       let reg_list = Writer.join ',' (Utils.seq_init !ctx write) in
-      fun buf -> bprintf buf "Obj %t;\n" reg_list
+      fun buf -> bprintf buf "  Obj %t;\n" reg_list
     else
       Writer.empty
 end
 
 (* Return a Writer.t that emits a sequence of statements which have the
- * effect of evaluating the given form and assigning the return value
+ * effect of evaluating the given expression and assigning the return value
  * to the given register. *)
-let write_form ~rctx =
+let write_expr ~rctx =
   let rec go ~reg = function
     | Int i -> fun buf ->
       bprintf buf "MAKE_INT(%t,%Ld);" (Register.write reg) i
@@ -67,6 +69,17 @@ let write_form ~rctx =
     | Var id ->
       let prelude, ident = Expr.write_access_var id in
       fun buf -> bprintf buf "%t%t=%t;" prelude (Register.write reg) ident
+
+    | Define (id, x) ->
+      let expr = go ~reg x in
+      let prelude, ident = Expr.write_assign_var id in
+      fun buf ->
+        bprintf buf "%t%t%t=%t;MAKE_NIL(%t);"
+          expr prelude ident (Register.write reg) (Register.write reg)
+
+    | Proc id ->
+      let proc = Expr.write_proc id in
+      fun buf -> bprintf buf "MAKE_PROC(%t,%t);" (Register.write reg) proc
 
     | Builtin (Plus, []) -> fun buf ->
       bprintf buf "MAKE_INT(%t,0);" (Register.write reg)
@@ -87,43 +100,40 @@ let write_form ~rctx =
       unary_fun ~reg ~name:"len" x
 
     | Builtin (Print, [x]) ->
-      let form = go ~reg x in
-      fun buf -> bprintf buf "%tdisplay(%t);" form (Register.write reg)
-
-    | Define (id, x) ->
-      let form = go ~reg x in
-      let prelude, ident = Expr.write_assign_var id in
-      fun buf ->
-        bprintf buf "%t%t%t=%t;MAKE_NIL(%t);"
-          form prelude ident (Register.write reg) (Register.write reg)
+      let expr = go ~reg x in
+      fun buf -> bprintf buf "%tdisplay(%t);" expr (Register.write reg)
 
     | Builtin (Cons, [a; b]) ->
       let r_rhs = Register.next rctx reg in
       binary_fun ~reg ~r_rhs ~name:"cons" (go ~reg a) b
 
+    | Builtin (Call, [x]) ->
+      unary_fun ~reg ~name:"call" x
+
     | Builtin (Minus, [])
     | Builtin (Len, _)
     | Builtin (Print, _)
-    | Builtin (Cons, _) ->
+    | Builtin (Cons, _)
+    | Builtin (Call, _) ->
       raise (Invalid_argument "invalid expression")
 
   (* Helper function to construct a writer which emits code to evaluate a function's
    * argument and then call it, assigning its result to the given register. *)
-  and unary_fun ~reg ~name form =
-    let form = go ~reg form in
+  and unary_fun ~reg ~name expr =
+    let expr = go ~reg expr in
     fun buf ->
       bprintf buf "%t%t=%s(%t);"
-        form
+        expr
         (Register.write reg)
         name
         (Register.write reg)
 
   (* Helper function which takes a writer emitting code to evaluate a function's first
-   * argument to 'reg', then a form to evaluate and store to 'r_rhs', and returns a
+   * argument to 'reg', then an expression to evaluate and store to 'r_rhs', and returns a
    * writer emiting code that evaluates a two-argument function and stores the result
    * to 'reg. *)
-  and binary_fun ~reg ~r_rhs ~name lhs form_rhs =
-    let rhs = go ~reg:r_rhs form_rhs in
+  and binary_fun ~reg ~r_rhs ~name lhs expr_rhs =
+    let rhs = go ~reg:r_rhs expr_rhs in
     fun buf ->
       bprintf buf "%t%t%t=%s(%t,%t);"
         lhs
@@ -143,30 +153,46 @@ let write_form ~rctx =
       (go ~reg lhs)
       rhss
 
-  in go
+  in fun expr -> go ~reg:(Register.zero rctx) expr
 
-(* Convert a form into a C program. *)
-let gen_code ectx forms =
+(* Convert a list of expressions into a C program that evaluates each one in turn
+ * and discards the results. *)
+let gen_code ectx exprs =
   let rctx = Register.init () in
   let buf = Buffer.create 2048 in
-  (* compute each form, but do not write it yet
+
+  (* compute the writer for each expression, but do not write it yet
    * (to allow rctx to be updated) *)
-  let form_writers = List.map (fun form ->
-      let reg = Register.zero rctx in
-      write_form ~rctx ~reg form
-    ) forms in
-  let init_globals, deinit_globals = Expr.write_ctx ectx in
+  let expr_writers = List.map (write_expr ~rctx) exprs in
+
+  let write_proc_body exprs buf =
+    let rctx = Register.init () in
+    let expr_writers = List.map (write_expr ~rctx) exprs in
+    Register.write_ctx rctx buf;
+    let rec loop = function
+      | [] ->
+        Buffer.add_string buf "  return NIL;\n"
+      | [final] ->
+        bprintf buf "  %treturn %t;\n" final (Register.write (Register.zero rctx))
+      | expr :: rest ->
+        bprintf buf "  %tdeinit(%t);\n" expr (Register.write (Register.zero rctx));
+        loop rest
+    in
+    loop expr_writers
+  in
+
+  let write_initial, write_final = Expr.write_ctx ~write_proc_body ectx in
   Buffer.add_string buf "#include \"chemic.h\"\n";
-  init_globals buf;
+  write_initial buf;
   Buffer.add_string buf "int main(){\n";
   (* emit declaration of necessary registers *)
   Register.write_ctx rctx buf;
   (* emit program statements *)
-  form_writers |> List.iter (fun writer ->
-      bprintf buf "%tdeinit(%t);\n"
+  expr_writers |> List.iter (fun writer ->
+      bprintf buf "  %tdeinit(%t);\n"
         writer
         (Register.write (Register.zero rctx))
     );
-  deinit_globals buf;
-  Buffer.add_string buf "finalize();return 0;}\n";
+  write_final buf;
+  Buffer.add_string buf "  finalize();return 0;\n}\n";
   Buffer.contents buf

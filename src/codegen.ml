@@ -8,49 +8,12 @@ type op = Expr.op =
 
 type expr = Expr.expr =
   | Int of int64
-  | String of string
-  | Var of string
-  | Define of string * expr
+  | String of Expr.string_id
+  | Var of Expr.var_id
+  | Define of Expr.var_id * expr
   | Builtin of op * expr list
 
 let bprintf = Printf.bprintf
-
-(* Create a sequence of a given length by applying a function to the index. *)
-let seq_init (n: int) (f: int -> 'a): 'a Seq.t =
-  let rec loop idx () =
-    if idx < n then
-      let v = f idx in
-      Seq.Cons (v, loop (idx + 1))
-    else
-      Seq.Nil
-  in loop 0
-
-(* Map a function over a sequence with access to the index. *)
-let seq_mapi f seq =
-  let rec loop i seq () =
-    match seq () with
-    | Seq.Nil -> Seq.Nil
-    | Seq.Cons (x, xs) -> Seq.Cons (f i x, loop (i + 1) xs)
-  in loop 0 seq
-
-(* Encode a string to the buffer as a C string literal *)
-let write_string_literal s buf =
-  let len = String.length s in
-  let rec loop n =
-    if n < len then (
-      let c = String.get s n in
-      if ' ' <= c && c <= '~' then (
-        if c = '\\' || c = '"' then
-          Buffer.add_char buf '\\';
-        Buffer.add_char buf c
-      ) else
-        bprintf buf "\\x%02x" (Char.code c);
-      loop (n + 1)
-    )
-  in
-  Buffer.add_char buf '"';
-  loop 0;
-  Buffer.add_char buf '"'
 
 module Register: sig
   (* tracks information related to generated registers *)
@@ -83,144 +46,27 @@ end = struct
   let write_ctx ctx =
     if !ctx > 0 then
       (* "Obj r0,r1,r2..." *)
-      let reg_list = Writer.join ',' (seq_init !ctx write) in
+      let reg_list = Writer.join ',' (Utils.seq_init !ctx write) in
       fun buf -> bprintf buf "Obj %t;\n" reg_list
     else
       Writer.empty
 end
 
-module Global: sig
-  (* keeps track of global program information *)
-  type ctx
-
-  val init: unit -> ctx
-
-  (* return a writer that emits an identifier that can be used to
-   * access the given string *)
-  val create_string: ctx -> string -> Writer.t
-
-  (* return a pair of writers that emit:
-   * - a series of statements
-   * - an identifier that, after those statements have been executed,
-   *   can be assigned to in order to modify the desired variable
-   *)
-  val assign_var: ctx -> string -> Writer.t * Writer.t
-
-  (* return a pair of writers that emit:
-   * - a series of statements
-   * - an identifier that, after those statements have been executed,
-   *   contains the desired variable
-   *)
-  val access_var: ctx -> string -> Writer.t * Writer.t
-
-  (* return a pair of writers that emit statements that should be placed at the
-   * start and end of the program to initialize and deinitialize the context *)
-  val write_ctx: ctx -> Writer.t * Writer.t
-
-end = struct
-  module StringMap = Map.Make(String)
-
-  type ctx = {
-    mutable string_literals: string list;
-    (* should be the same as 'List.length string_literals' *)
-    mutable num_strings: int;
-    mutable var_idxs: int StringMap.t;
-  }
-
-  let init () = {
-    string_literals = [];
-    num_strings = 0;
-    var_idxs = StringMap.empty;
-  }
-
-  let create_string ctx s =
-    let idx = ctx.num_strings in
-    ctx.string_literals <- s :: ctx.string_literals;
-    ctx.num_strings <- idx + 1;
-    fun buf -> bprintf buf "&STR%d" idx
-
-  let global_var idx = fun buf -> bprintf buf "GLO%d" idx
-
-  let assign_var ctx name =
-    (* NOTE: the naive approach used here of "don't deinitialize a variable
-     * the first time it's been assigned to" doesn't work in the presence of
-     * any nonlinear control flow (procedures, conditionals, loops, etc.) *)
-    match StringMap.find_opt name ctx.var_idxs with
-    | Some idx ->
-      let var = global_var idx in
-      ((fun buf -> bprintf buf "deinit(%t);" var), var)
-    | None ->
-      let new_idx = StringMap.cardinal ctx.var_idxs in
-      ctx.var_idxs <- StringMap.add name new_idx ctx.var_idxs;
-      (Writer.empty, global_var new_idx)
-
-  let access_var ctx name =
-    match StringMap.find_opt name ctx.var_idxs with
-    | Some idx ->
-      let var = global_var idx in
-      ((fun buf -> bprintf buf "clone(%t);" var), var)
-    | None ->
-      raise (Invalid_argument (Printf.sprintf "undefined variable: '%s'" name))
-
-  let write_ctx ctx =
-
-    (* declarations of strings
-     * (e.g. 'Str STR0={...},STR1={...},...;') *)
-    let string_decls =
-      if ctx.num_strings = 0 then
-        Writer.empty
-      else
-        let decls =
-          List.rev ctx.string_literals
-          |> List.to_seq
-          |> seq_mapi (fun i lit ->
-              fun buf ->
-                bprintf buf "STR%d={%d,0,%t}"
-                  i (* len *)
-                  (String.length lit) (* ref_count *)
-                  (write_string_literal lit) (* data *)
-            )
-          |> Writer.join ','
-        in
-        fun buf -> bprintf buf "Str %t;\n" decls
-    in
-
-    let num_vars = StringMap.cardinal ctx.var_idxs in
-    (* declarations of variables *)
-    let var_decls =
-      if num_vars = 0 then
-        Writer.empty
-      else
-        let decls = Writer.join ',' (seq_init num_vars global_var) in
-        fun buf -> bprintf buf "Obj %t;\n" decls
-    in
-
-    let deinits =
-      fun buf ->
-        for i = 0 to num_vars - 1 do
-          bprintf buf "deinit(%t);" (global_var i);
-        done
-    in
-        
-    ((fun buf -> string_decls buf; var_decls buf), deinits)
-end
-
 (* Return a Writer.t that emits a sequence of statements which have the
  * effect of evaluating the given form and assigning the return value
  * to the given register. *)
-let write_form ~gctx ~rctx =
+let write_form ~rctx =
   let rec go ~reg = function
     | Int i -> fun buf ->
       bprintf buf "MAKE_INT(%t,%Ld);" (Register.write reg) i
 
-    | String s ->
-      let str = Global.create_string gctx s in
+    | String id ->
+      let str = Expr.write_string id in
       fun buf -> bprintf buf "MAKE_STRING(%t,%t);" (Register.write reg) str
 
-    | Var s ->
-      let prelude, ident = Global.access_var gctx s in
-      fun buf ->
-        bprintf buf "%t%t=%t;" prelude (Register.write reg) ident
+    | Var id ->
+      let prelude, ident = Expr.write_access_var id in
+      fun buf -> bprintf buf "%t%t=%t;" prelude (Register.write reg) ident
 
     | Builtin (Plus, []) -> fun buf ->
       bprintf buf "MAKE_INT(%t,0);" (Register.write reg)
@@ -244,9 +90,9 @@ let write_form ~gctx ~rctx =
       let form = go ~reg x in
       fun buf -> bprintf buf "%tdisplay(%t);" form (Register.write reg)
 
-    | Define (i, x) ->
+    | Define (id, x) ->
       let form = go ~reg x in
-      let prelude, ident = Global.assign_var gctx i in
+      let prelude, ident = Expr.write_assign_var id in
       fun buf ->
         bprintf buf "%t%t%t=%t;MAKE_NIL(%t);"
           form prelude ident (Register.write reg) (Register.write reg)
@@ -300,17 +146,16 @@ let write_form ~gctx ~rctx =
   in go
 
 (* Convert a form into a C program. *)
-let gen_code forms =
-  let gctx = Global.init () in
+let gen_code ectx forms =
   let rctx = Register.init () in
   let buf = Buffer.create 2048 in
   (* compute each form, but do not write it yet
    * (to allow rctx to be updated) *)
   let form_writers = List.map (fun form ->
       let reg = Register.zero rctx in
-      write_form ~gctx ~rctx ~reg form
+      write_form ~rctx ~reg form
     ) forms in
-  let init_globals, deinit_globals = Global.write_ctx gctx in
+  let init_globals, deinit_globals = Expr.write_ctx ectx in
   Buffer.add_string buf "#include \"chemic.h\"\n";
   init_globals buf;
   Buffer.add_string buf "int main(){\n";
@@ -318,8 +163,9 @@ let gen_code forms =
   Register.write_ctx rctx buf;
   (* emit program statements *)
   form_writers |> List.iter (fun writer ->
-      writer buf;
-      bprintf buf "deinit(%t);\n" (Register.write (Register.zero rctx))
+      bprintf buf "%tdeinit(%t);\n"
+        writer
+        (Register.write (Register.zero rctx))
     );
   deinit_globals buf;
   Buffer.add_string buf "finalize();return 0;}\n";

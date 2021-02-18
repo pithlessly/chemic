@@ -165,15 +165,15 @@ let gen_code ectx exprs =
    * (to allow rctx to be updated) *)
   let expr_writers = List.map (write_expr ~rctx) exprs in
 
-  let write_proc_body exprs buf =
+  let write_proc_body ~write_final exprs buf =
     let rctx = Register.init () in
     let expr_writers = List.map (write_expr ~rctx) exprs in
     Register.write_ctx rctx buf;
     let rec loop = function
       | [] ->
-        Buffer.add_string buf "  return NIL;\n"
+        bprintf buf "  %treturn NIL;\n" write_final
       | [final] ->
-        bprintf buf "  %treturn %t;\n" final (Register.write (Register.zero rctx))
+        bprintf buf "  %t\n  %treturn %t;\n" final write_final (Register.write (Register.zero rctx))
       | expr :: rest ->
         bprintf buf "  %tdeinit(%t);\n" expr (Register.write (Register.zero rctx));
         loop rest
@@ -193,6 +193,7 @@ let gen_code ectx exprs =
         writer
         (Register.write (Register.zero rctx))
     );
+  Buffer.add_string buf "  ";
   write_final buf;
-  Buffer.add_string buf "  finalize();return 0;\n}\n";
+  Buffer.add_string buf "finalize();\n  return 0;\n}\n";
   Buffer.contents buf

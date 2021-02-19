@@ -143,6 +143,52 @@ let build_with ~(gctx: global_ctx) =
       String id
   in go ~lctx:None
 
+let bprintf = Printf.bprintf
+
+type local_writers = {
+  name: Writer.t;
+  before: Writer.t;
+  after: Writer.t;
+  body: expr list;
+}
+
+type global_writers = {
+  before: Writer.t;
+  procs: local_writers list;
+  after: Writer.t;
+  top_level: expr list;
+}
+
+(* generate declarations for 'num' variables in a given format *)
+let write_obj_var_decls ~(indent_chars: int) fmt num =
+  if num = 0 then
+    Writer.empty
+  else
+    let decls =
+      Utils.seq_init num (fun i buf -> bprintf buf fmt i)
+      |> Writer.join ','
+    in
+    fun buf ->
+      for _ = 0 to indent_chars - 1 do
+        Buffer.add_char buf ' ';
+      done;
+      bprintf buf "Obj %t;\n" decls
+
+(* generate statements to deinitialize 'num' variables in a given format *)
+let write_obj_var_deinits fmt num buf =
+  for i = 0 to num - 1 do
+    Buffer.add_string buf "deinit(";
+    bprintf buf fmt i;
+    Buffer.add_string buf ");"
+  done
+
+let write_local i { lctx; body } =
+  let num_locals = StringMap.cardinal lctx.var_ids in
+  { name = (fun buf -> bprintf buf "PROC%d" i);
+    before = write_obj_var_decls ~indent_chars:2 "LOC%d" num_locals;
+    after = write_obj_var_deinits "LOC%d" num_locals;
+    body }
+
 let build forms =
   let gctx = { string_literals = [];
                num_strings = 0;
@@ -150,14 +196,43 @@ let build forms =
                num_procs = 0;
                var_ids = StringMap.empty }
   in
-  (gctx, List.map (build_with ~gctx) forms)
 
-let bprintf = Printf.bprintf
+  let top_level = List.map (build_with ~gctx) forms in
 
-let write_string id =
+  (* declarations of global static values to hold string literals *)
+  let write_string_decls =
+    if gctx.num_strings = 0 then
+      Writer.empty
+    else
+      let decls =
+        List.rev gctx.string_literals
+        |> List.to_seq
+        |> Utils.seq_mapi (fun i lit ->
+            fun buf ->
+              bprintf buf "STR%d={%d,0,%t}"
+                i
+                (String.length lit) (* 'len' field *)
+                (* 'ref_count' field is 0 to indicate it should never be freed *)
+                (Writer.c_string lit) (* 'data' field *)
+          )
+        |> Writer.join ','
+      in
+      fun buf -> bprintf buf "static Str %t;\n" decls
+  in
+
+  let num_globals = StringMap.cardinal gctx.var_ids in
+
+  { before = (fun buf ->
+        write_string_decls buf;
+        write_obj_var_decls ~indent_chars:0 "GLO%d" num_globals buf);
+    procs = gctx.procs |> List.rev |> List.mapi write_local;
+    after = write_obj_var_deinits "GLO%d" num_globals;
+    top_level }
+
+let write_access_string id =
   fun buf -> bprintf buf "&STR%d" id
 
-let write_proc id =
+let write_access_proc id =
   fun buf -> bprintf buf "&PROC%d" id
 
 let write_var = function
@@ -171,67 +246,3 @@ let write_access_var id =
 let write_assign_var id =
   let var = write_var id in
   ((fun buf -> bprintf buf "deinit(%t);" var), var)
-
-let write_ctx gctx ~write_proc_body =
-
-  (* declarations of strings
-   * (e.g. 'Str STR0={...},STR1={...},...;') *)
-  let string_decls =
-    if gctx.num_strings = 0 then
-      Writer.empty
-    else
-      let decls =
-        List.rev gctx.string_literals
-        |> List.to_seq
-        |> Utils.seq_mapi (fun i lit ->
-            fun buf ->
-              bprintf buf "STR%d={%d,0,%t}"
-                i (* len *)
-                (String.length lit) (* ref_count *)
-                (Writer.c_string lit) (* data *)
-          )
-        |> Writer.join ','
-      in
-      fun buf -> bprintf buf "Str %t;\n" decls
-  in
-
-  let declare_vars ~indent ~prefix num =
-    if num = 0 then
-      Writer.empty
-    else
-      let decls =
-        Utils.seq_init num
-          (fun i -> fun buf -> bprintf buf "%s%d=NIL" prefix i)
-        |> Writer.join ','
-      in
-      fun buf -> bprintf buf "%sObj %t;\n" indent decls
-  in
-
-  let deinit_vars prefix num =
-    fun buf ->
-      for i = 0 to num - 1 do
-        bprintf buf "deinit(%s%d);" prefix i;
-      done
-  in
-
-  let procs =
-    fun buf ->
-      gctx.procs |> List.iteri (fun i { lctx; body } ->
-          let num_locals = StringMap.cardinal lctx.var_ids in
-          let write_final = deinit_vars "LOC" num_locals in
-          bprintf buf "Obj PROC%d() {\n%t%t}\n"
-            (gctx.num_procs - 1 - i)
-            (declare_vars ~indent:"  " ~prefix:"LOC" num_locals)
-            (write_proc_body ~write_final body)
-        )
-  in
-
-  let num_globals = StringMap.cardinal gctx.var_ids in
-  let prelude =
-    fun buf ->
-      string_decls buf;
-      declare_vars ~indent:"" ~prefix:"GLO" num_globals buf;
-      procs buf
-  in
-
-  (prelude, deinit_vars "GLO" num_globals)

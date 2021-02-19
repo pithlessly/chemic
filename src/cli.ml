@@ -12,6 +12,6 @@ let input_all ch =
 let main () =
   let code = input_all stdin in
   let parsed = Parse.parse code in
-  let ectx, exprs = Expr.build parsed in
-  let compiled = Codegen.gen_code ectx exprs in
+  let expr_data = Expr.build parsed in
+  let compiled = Codegen.gen_code expr_data in
   print_string compiled

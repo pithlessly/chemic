@@ -1,11 +1,6 @@
 (* Functionality for translating parsed forms into ASTs and collecting other
  * information into symbol tables, etc. in the process. *)
 
-(* stores globally relevant information created while parsing *)
-type global_ctx
-(* stores information created while parsing that is relevant to only one procedure *)
-type local_ctx
-
 (* a token identifying a global variable *)
 type global_var_id
 (* a token identifying a local variable *)
@@ -37,10 +32,32 @@ type expr =
   | Proc of proc_id
   | Builtin of op * expr list
 
-val build: Parse.form list -> global_ctx * expr list
+type local_writers = {
+  (* the name of the procedure *)
+  name: Writer.t;
+  (* declarations to be placed at the start of the procedure *)
+  before: Writer.t;
+  (* statements to run before returning from the procedure *)
+  after: Writer.t;
+  (* the body of the procedure *)
+  body: expr list;
+}
 
-val write_string: string_id -> Writer.t
-val write_proc: proc_id -> Writer.t
+type global_writers = {
+  (* declarations to be placed before main() *)
+  before: Writer.t;
+  (* information needed to declare procedures *)
+  procs: local_writers list;
+  (* statements to be placed at the end of main() *)
+  after: Writer.t;
+  (* the expressions at the top-level *)
+  top_level: expr list;
+}
+
+val build: Parse.form list -> global_writers
+
+val write_access_string: string_id -> Writer.t
+val write_access_proc: proc_id -> Writer.t
 (* return a pair of writers that emit:
  * - a series of statements
  * - an identifier that, after those statements have been executed,
@@ -53,10 +70,3 @@ val write_access_var: var_id -> Writer.t * Writer.t
  *   can be assigned to in order to modify the desired variable
  *)
 val write_assign_var: var_id -> Writer.t * Writer.t
-
-(* return a pair of writers that emit statements that should be placed at the
- * start and end of the program to initialize and deinitialize the context *)
-val write_ctx:
-  global_ctx ->
-  write_proc_body:(write_final:Writer.t -> expr list -> Writer.t) ->
-  Writer.t * Writer.t

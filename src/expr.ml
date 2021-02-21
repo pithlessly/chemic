@@ -271,7 +271,7 @@ let build forms =
       Writer.empty
     else
       let decls =
-        Utils.seq_init num_globals (fun i buf -> bprintf buf "GLO%d" i)
+        Utils.seq_init num_globals (fun i buf -> bprintf buf "GLO%d=NIL" i)
         |> Writer.join ','
       in
       fun buf -> bprintf buf "static Obj %t;\n" decls

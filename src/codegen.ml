@@ -215,6 +215,7 @@ let gen_code (expr_data: Expr.global_writers) =
   expr_data.decls buf;
   expr_data.procs |> List.iter write_proc_body;
   Buffer.add_string buf "int main(){\n";
+  expr_data.main.before buf;
   (* emit declaration of necessary registers *)
   Register.write_ctx rctx buf;
   (* emit program statements *)

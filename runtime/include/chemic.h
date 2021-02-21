@@ -90,6 +90,9 @@ inline static char const* classify(Tag t) {
 
 /*= external functions =*/
 
+extern void arg_init(size_t n);
+extern void finalize();
+
 // take & return ownership of their arguments
 extern Obj add(Obj a, Obj b);
 extern Obj sub(Obj a, Obj b);
@@ -98,11 +101,10 @@ extern Obj mul(Obj a, Obj b);
 extern Obj len(Obj a);
 extern Obj cons(Obj a, Obj b);
 extern Obj call(Obj a);
+extern void arg_push(Obj a);
 extern void deinit(Obj a);
 // do not take ownership of their argument
 extern void clone(Obj a);
 extern void display(Obj a);
-
-extern void finalize();
 
 #endif /* CHEMIC_H */

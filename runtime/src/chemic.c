@@ -57,11 +57,6 @@ Obj cons(Obj a, Obj b) {
     return a;
 }
 
-Obj call(Obj a) {
-    EXPECT(a, tag_proc);
-    return a.data.p();
-}
-
 inline static void str_del(Str *s) {
     if (s->ref_count > 0) {
         s->ref_count--;
@@ -126,14 +121,14 @@ void display(Obj a) {
     }
 }
 
-void deinit(Obj o) {
-    switch (o.tag) {
+void deinit(Obj a) {
+    switch (a.tag) {
         case tag_nil:
         case tag_int:
         case tag_proc:
             break;
         case tag_str:
-            str_del(o.data.s);
+            str_del(a.data.s);
             break;
         case tag_cons:
             /* TODO: garbage collection */
@@ -141,4 +136,44 @@ void deinit(Obj o) {
     }
 }
 
-void finalize() {}
+static struct {
+    Obj *buf;
+    size_t len;
+    size_t cap;
+} args = { NULL, 0, 0 };
+
+void arg_init(size_t n) {
+    args.len = 0;
+    if (n > args.cap) {
+        // round up to avoid reallocating frequently
+        args.cap = (n | 7) + 1;
+        args.buf = realloc(args.buf, args.cap * sizeof(Obj));
+        if (args.buf == NULL) {
+            DIE("out of memory");
+        }
+    }
+}
+
+void arg_push(Obj a) {
+    args.buf[args.len] = a;
+    args.len++;
+}
+
+static void arg_clear() {
+    for (size_t i = 0; i < args.len; i++) {
+        deinit(args.buf[i]);
+    }
+    args.len = 0;
+}
+
+Obj call(Obj a) {
+    // just ignore all the arguments since procedures can't actually take them yet
+    arg_clear();
+    EXPECT(a, tag_proc);
+    return a.data.p();
+}
+
+void finalize() {
+    arg_clear();
+    free(args.buf);
+}

@@ -12,6 +12,7 @@ type expr = Expr.expr =
   | String of Expr.string_id
   | Var of Expr.var_id
   | Define of Expr.var_id * expr
+  | Let of { lhs: Expr.local_var_id; rhs: expr; body: expr list }
   | Proc of Expr.proc_id
   | Builtin of op * expr list
 
@@ -74,8 +75,30 @@ let write_expr ~rctx =
       let expr = go ~reg x in
       let prelude, ident = Expr.write_assign_var id in
       fun buf ->
-        bprintf buf "%t%t%t=%t;MAKE_NIL(%t);"
-          expr prelude ident (Register.write reg) (Register.write reg)
+        expr buf;
+        prelude buf;
+        bprintf buf "%t=%t;MAKE_NIL(%t);"
+          ident (Register.write reg) (Register.write reg)
+
+    | Let { lhs; rhs; body } ->
+      let rhs = go ~reg rhs in
+      let ident, deinit = Expr.write_let_var lhs in
+      let body = List.map (go ~reg) body in
+      fun buf ->
+        rhs buf;
+        bprintf buf "%t=%t;" ident (Register.write reg);
+        let rec loop = function
+          | [] ->
+            raise (Invalid_argument "let block is empty")
+          | [final] ->
+            final buf
+          | expr :: rest ->
+            expr buf;
+            bprintf buf "deinit(%t);" (Register.write reg);
+            loop rest
+        in
+        loop body;
+        deinit buf
 
     | Proc id ->
       let proc = Expr.write_access_proc id in
@@ -158,17 +181,12 @@ let write_expr ~rctx =
 (* Convert a list of expressions into a C program that evaluates each one in turn
  * and discards the results. *)
 let gen_code (expr_data: Expr.global_writers) =
-  let rctx = Register.init () in
   let buf = Buffer.create 2048 in
 
-  (* compute the writer for each expression, but do not write it yet
-   * (to allow rctx to be updated) *)
-  let top_level = List.map (write_expr ~rctx) expr_data.top_level in
-
-  let write_proc_body (proc_data: Expr.local_writers) =
+  let write_proc_body (name, (proc_data: Expr.local_writers)) =
     let rctx = Register.init () in
     let body = List.map (write_expr ~rctx) proc_data.body in
-    bprintf buf "Obj %t() {\n" proc_data.name;
+    bprintf buf "Obj %t() {\n" name;
     proc_data.before buf;
     Register.write_ctx rctx buf;
     let rec loop = function
@@ -190,8 +208,11 @@ let gen_code (expr_data: Expr.global_writers) =
     Buffer.add_string buf "}\n";
   in
 
+  let rctx = Register.init () in
+  let top_level = List.map (write_expr ~rctx) expr_data.main.body in
+
   Buffer.add_string buf "#include \"chemic.h\"\n";
-  expr_data.before buf;
+  expr_data.decls buf;
   expr_data.procs |> List.iter write_proc_body;
   Buffer.add_string buf "int main(){\n";
   (* emit declaration of necessary registers *)
@@ -203,6 +224,7 @@ let gen_code (expr_data: Expr.global_writers) =
         (Register.write (Register.zero rctx))
     );
   Buffer.add_string buf "  ";
-  expr_data.after buf;
+  expr_data.main.after buf;
+  expr_data.more_after_main buf;
   Buffer.add_string buf "finalize();\n  return 0;\n}\n";
   Buffer.contents buf

@@ -3,3 +3,9 @@ val seq_init: int -> (int -> 'a) -> 'a Seq.t
 
 (* map a function over a sequence with access to the index *)
 val seq_mapi: (int -> 'a -> 'b) -> 'a Seq.t -> 'b Seq.t
+
+(* iterate over a sequence with access to the index *)
+val seq_iteri: (int -> 'a -> unit) -> 'a Seq.t -> unit
+
+(* return the first 'Some _' value returned by the function for an element in the list *)
+val search: ('a -> 'b option) -> 'a list -> 'b option

@@ -27,17 +27,23 @@ type expr =
   | String of string_id
   | Var of var_id
   | Define of var_id * expr
+  | Let of { lhs: local_var_id; rhs: expr; body: expr list }
   | Proc of proc_id
   | Builtin of op * expr list
 
 module StringMap = Map.Make(String)
+module IntMap = Map.Make(Int)
 
 type local_ctx = {
-  mutable var_ids: int StringMap.t;
+  (* Tracks whether each variable was declared using 'define' (in
+   * which case it should be initialized to NIL because it can be
+   * used before it is initialized) or using 'let' (in which case
+   * it can be left uninitialized. *)
+  mutable var_metadata: bool IntMap.t;
 }
 
 type proc = {
-  lctx: local_ctx;
+  locals: local_ctx;
   body: expr list;
 }
 
@@ -45,18 +51,13 @@ type global_ctx = {
   mutable string_literals: string list;
   (* should be the same as 'List.length string_literals' *)
   mutable num_strings: int;
+
   mutable procs: proc list;
   (* should be the same as 'List.length procs' *)
   mutable num_procs: int;
-  mutable var_ids: int StringMap.t;
-}
 
-let add_var_id key map =
-  match StringMap.find_opt key map with
-  | Some id -> (id, map)
-  | None ->
-    let id = StringMap.cardinal map in
-    (id, StringMap.add key id map)
+  mutable globals: global_var_id StringMap.t;
+}
 
 let get_op = function
   | Ident "+" -> Plus
@@ -72,63 +73,100 @@ let get_op = function
   | _ ->
     raise (Invalid_argument "non-identifier in function position")
 
+let find_defined_vars forms =
+  List.to_seq forms
+  |> Seq.filter_map
+    (function
+      | List [Ident "define"; Ident i; _] -> Some i
+      | _ -> None)
+
 let build_with ~(gctx: global_ctx) =
-  let rec go ~(lctx: local_ctx option) = function
-    | List [Ident "define"; Ident name; expr] ->
+  let rec go
+      ~(lctx: local_ctx)
+      ~(local_scopes: local_var_id StringMap.t list)
+      ~(block_level: bool) =
+    function
+
+    | List [Ident "define"; Ident ident; expr] ->
       let id =
-        match lctx with
-        | Some lctx ->
-          let id, var_ids' = add_var_id name lctx.var_ids in
-          lctx.var_ids <- var_ids';
-          Local id
-        | None ->
-          let id, var_ids' = add_var_id name gctx.var_ids in
-          gctx.var_ids <- var_ids';
-          Global id
+        if not block_level then
+          raise (Invalid_argument "(define) cannot be used as an expression")
+        else
+          (* the variable being assigned to must already be present in the
+           * nearest scope, as the caller will have already scanned through
+           * the entire body for (define) expressions and added it in *)
+          match local_scopes with
+          | scope :: _ -> Local (StringMap.find ident scope)
+          | [] -> Global (StringMap.find ident gctx.globals)
       in
-      Define (id, go ~lctx expr)
+      Define (id, go ~lctx ~local_scopes ~block_level:false expr)
+
+    | List (Ident "let" ::
+            List [List [Ident lhs; rhs]] ::
+            body) ->
+      let id_offset = IntMap.cardinal lctx.var_metadata in
+      let scope =
+        find_defined_vars body
+        |> Utils.seq_mapi (fun i var ->
+            let id = id_offset + i in
+            lctx.var_metadata <- IntMap.add id true lctx.var_metadata;
+            (var, id)
+          )
+        |> StringMap.of_seq
+      in
+      let var_id = id_offset + StringMap.cardinal scope in
+      let scope = StringMap.add lhs var_id scope in
+      lctx.var_metadata <- IntMap.add var_id false lctx.var_metadata;
+      let recurse_rhs =
+        go ~lctx ~local_scopes ~block_level:false
+      in
+      let recurse_body =
+        go ~lctx ~local_scopes:(scope :: local_scopes) ~block_level:true
+      in
+      Let { lhs = var_id;
+            rhs = recurse_rhs rhs;
+            body = List.map recurse_body body }
 
     | List (Ident "proc" :: body) ->
+      let lctx = { var_metadata = IntMap.empty } in
+      let scope =
+        find_defined_vars body
+        |> Utils.seq_mapi (fun i var ->
+            let id = i in
+            lctx.var_metadata <- IntMap.add id true lctx.var_metadata;
+            (var, id)
+          )
+        |> StringMap.of_seq
+      in
+      let recurse =
+        go ~lctx ~local_scopes:[scope] ~block_level:true
+      in
+      gctx.procs <- { locals = lctx;
+                      body = List.map recurse body } :: gctx.procs;
       let id = gctx.num_procs in
       gctx.num_procs <- id + 1;
-      let lctx = { var_ids = StringMap.empty } in
-      let proc = { lctx; body = List.map (go ~lctx:(Some lctx)) body } in
-      gctx.procs <- proc :: gctx.procs;
       Proc id
 
     | List (f :: args) ->
-      Builtin (get_op f, List.map (go ~lctx) args)
+      let recurse = go ~lctx ~local_scopes ~block_level:false in
+      Builtin (get_op f, List.map recurse args)
 
     | List [] ->
       raise (Invalid_argument "nil cannot be evaluated")
 
     | Ident name ->
       let id =
-        match lctx with
-        | Some lctx ->
-          (match StringMap.find_opt name lctx.var_ids with
-           | Some id -> Local id
-           | None ->
-             match StringMap.find_opt name gctx.var_ids with
-             | Some id -> Global id
-             | None ->
-               (* If a procedure references a variable that cannot be found in the
-                * global or local scope, we assume that the variable exists in the
-                * global scope but has not been initialized. *)
-               let id, var_ids' = add_var_id name gctx.var_ids in
-               gctx.var_ids <- var_ids';
-               Global id)
+        match Utils.search (StringMap.find_opt name) local_scopes with
+        | Some id -> Local id
         | None ->
-          match StringMap.find_opt name gctx.var_ids with
+          match StringMap.find_opt name gctx.globals with
           | Some id -> Global id
           | None ->
-            (* On the other hand, if an undefined variable is referenced in the
-             * global scope, we throw an error. Note that many Scheme implementations
-             * seem to allow previously undefined global variables to be created in
-             * procedures using 'set!', which would make this error incorrect.
-             * However, such usage of 'set!' is not standard-compliant, so we don't
-             * have to support it.
-             *)
+            (* If an undefined variable is referenced in the global scope, we
+             * throw an error. Note that many Scheme implementations allow global
+             * variables to be defined using 'set!', which would make this error
+             * incorrect. However, such usage of 'set!' is not standard-compliant,
+             * so we don't have to support it. *)
             raise (Invalid_argument (Printf.sprintf "undefined variable: %s" name))
       in
       Var id
@@ -141,63 +179,68 @@ let build_with ~(gctx: global_ctx) =
       gctx.num_strings <- id + 1;
       gctx.string_literals <- s :: gctx.string_literals;
       String id
-  in go ~lctx:None
+
+  in
+  fun forms ->
+    let lctx = { var_metadata = IntMap.empty } in
+    find_defined_vars forms
+    |> Utils.seq_iteri (fun i var ->
+        let id = i in
+        gctx.globals <- StringMap.add var id gctx.globals;
+      );
+    { locals = lctx;
+      body = List.map (go ~lctx ~local_scopes:[] ~block_level:true) forms }
 
 let bprintf = Printf.bprintf
 
 type local_writers = {
-  name: Writer.t;
   before: Writer.t;
   after: Writer.t;
   body: expr list;
 }
 
-type global_writers = {
-  before: Writer.t;
-  procs: local_writers list;
-  after: Writer.t;
-  top_level: expr list;
-}
+let write_local { locals; body } =
+  { before =
+      (if IntMap.cardinal locals.var_metadata = 0 then
+         Writer.empty
+       else
+         let decls =
+           IntMap.to_seq locals.var_metadata
+           |> Seq.map (fun (i, is_define) buf ->
+               bprintf buf (if is_define then
+                              "LOC%d=NIL"
+                            else
+                              "LOC%d") i
+             )
+           |> Writer.join ','
+         in
+         fun buf -> bprintf buf "  Obj %t;\n" decls);
 
-(* generate declarations for 'num' variables in a given format *)
-let write_obj_var_decls ~(indent_chars: int) fmt num =
-  if num = 0 then
-    Writer.empty
-  else
-    let decls =
-      Utils.seq_init num (fun i buf -> bprintf buf fmt i)
-      |> Writer.join ','
-    in
-    fun buf ->
-      for _ = 0 to indent_chars - 1 do
-        Buffer.add_char buf ' ';
-      done;
-      bprintf buf "Obj %t;\n" decls
+    after =
+      (fun buf ->
+         IntMap.iter (fun i is_define ->
+             if is_define then
+               bprintf buf "deinit(LOC%d);" i
+           ) locals.var_metadata);
 
-(* generate statements to deinitialize 'num' variables in a given format *)
-let write_obj_var_deinits fmt num buf =
-  for i = 0 to num - 1 do
-    Buffer.add_string buf "deinit(";
-    bprintf buf fmt i;
-    Buffer.add_string buf ");"
-  done
-
-let write_local i { lctx; body } =
-  let num_locals = StringMap.cardinal lctx.var_ids in
-  { name = (fun buf -> bprintf buf "PROC%d" i);
-    before = write_obj_var_decls ~indent_chars:2 "LOC%d" num_locals;
-    after = write_obj_var_deinits "LOC%d" num_locals;
     body }
+
+type global_writers = {
+  decls: Writer.t;
+  procs: (Writer.t * local_writers) list;
+  main: local_writers;
+  more_after_main: Writer.t;
+}
 
 let build forms =
   let gctx = { string_literals = [];
                num_strings = 0;
                procs = [];
                num_procs = 0;
-               var_ids = StringMap.empty }
+               globals = StringMap.empty }
   in
 
-  let top_level = List.map (build_with ~gctx) forms in
+  let main = build_with ~gctx forms in
 
   (* declarations of global static values to hold string literals *)
   let write_string_decls =
@@ -220,14 +263,36 @@ let build forms =
       fun buf -> bprintf buf "static Str %t;\n" decls
   in
 
-  let num_globals = StringMap.cardinal gctx.var_ids in
+  let num_globals = StringMap.cardinal gctx.globals in
 
-  { before = (fun buf ->
-        write_string_decls buf;
-        write_obj_var_decls ~indent_chars:0 "GLO%d" num_globals buf);
-    procs = gctx.procs |> List.rev |> List.mapi write_local;
-    after = write_obj_var_deinits "GLO%d" num_globals;
-    top_level }
+  (* declarations of global static objects to hold global variables *)
+  let write_global_decls =
+    if num_globals = 0 then
+      Writer.empty
+    else
+      let decls =
+        Utils.seq_init num_globals (fun i buf -> bprintf buf "GLO%d" i)
+        |> Writer.join ','
+      in
+      fun buf -> bprintf buf "static Obj %t;\n" decls
+  in
+
+  { decls = (fun buf -> write_string_decls buf; write_global_decls buf);
+
+    procs =
+      List.rev gctx.procs
+      |> List.mapi (fun i proc ->
+          ((fun buf -> bprintf buf "PROC%d" i),
+           write_local proc));
+
+    main = write_local main;
+
+    more_after_main =
+      (fun buf ->
+         for i = 0 to num_globals - 1 do
+           bprintf buf "deinit(GLO%d);" i
+         done)
+  }
 
 let write_access_string id =
   fun buf -> bprintf buf "&STR%d" id
@@ -246,3 +311,7 @@ let write_access_var id =
 let write_assign_var id =
   let var = write_var id in
   ((fun buf -> bprintf buf "deinit(%t);" var), var)
+
+let write_let_var id =
+  let var = write_var (Local id) in
+  (var, (fun buf -> bprintf buf "deinit(%t);" var))

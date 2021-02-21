@@ -29,12 +29,11 @@ type expr =
   | String of string_id
   | Var of var_id
   | Define of var_id * expr
+  | Let of { lhs: local_var_id; rhs: expr; body: expr list }
   | Proc of proc_id
   | Builtin of op * expr list
 
 type local_writers = {
-  (* the name of the procedure *)
-  name: Writer.t;
   (* declarations to be placed at the start of the procedure *)
   before: Writer.t;
   (* statements to run before returning from the procedure *)
@@ -45,13 +44,13 @@ type local_writers = {
 
 type global_writers = {
   (* declarations to be placed before main() *)
-  before: Writer.t;
-  (* information needed to declare procedures *)
-  procs: local_writers list;
-  (* statements to be placed at the end of main() *)
-  after: Writer.t;
-  (* the expressions at the top-level *)
-  top_level: expr list;
+  decls: Writer.t;
+  (* procedure names and the information needed to define them *)
+  procs: (Writer.t * local_writers) list;
+  (* information needed in main() *)
+  main: local_writers;
+  (* additional statements to be placed at the end of main() *)
+  more_after_main: Writer.t;
 }
 
 val build: Parse.form list -> global_writers
@@ -68,5 +67,13 @@ val write_access_var: var_id -> Writer.t * Writer.t
  * - a series of statements
  * - an identifier that, after those statements have been executed,
  *   can be assigned to in order to modify the desired variable
+ *   with (define)
  *)
 val write_assign_var: var_id -> Writer.t * Writer.t
+(* return a pair of writers that emit:
+ * - an identifier that can be assigned to in order to initialize
+ *   the desired variable at the beginning of the (let) block
+ * - a series of statements that can be used to deinitialize the
+ *   desired variable at the end of the (let) block
+ *)
+val write_let_var: local_var_id -> Writer.t * Writer.t

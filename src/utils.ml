@@ -13,3 +13,20 @@ let seq_mapi f seq =
     | Seq.Nil -> Seq.Nil
     | Seq.Cons (x, xs) -> Seq.Cons (f i x, loop (i + 1) xs)
   in loop 0 seq
+
+let seq_iteri f seq =
+  let rec loop i seq =
+    match seq () with
+    | Seq.Nil -> ()
+    | Seq.Cons (x, xs) ->
+      f i x;
+      loop (i + 1) xs
+  in loop 0 seq
+
+let rec search f =
+  function
+  | [] -> None
+  | x :: xs ->
+    match f x with
+    | Some res -> Some res
+    | None -> search f xs

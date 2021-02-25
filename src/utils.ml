@@ -1,3 +1,10 @@
+let unfold f init =
+  let rec go acc xs =
+    match f acc with
+    | Some x, acc -> go acc (x :: xs)
+    | None, acc -> (List.rev xs, acc)
+  in go init []
+
 let seq_init (n: int) (f: int -> 'a): 'a Seq.t =
   let rec loop idx () =
     if idx < n then

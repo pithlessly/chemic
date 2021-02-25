@@ -1,14 +1,3 @@
-(* utility function that takes a generator `f` (that transforms state and
- * returns an intermediate value) and returns the final state and a list
- * of all intermediate values *)
-
-let unfold ~(f: 'a -> 'b option * 'a) (init: 'a): 'b list * 'a =
-  let rec go acc xs =
-    match f acc with
-    | Some x, acc -> go acc (x :: xs)
-    | None, acc -> (List.rev xs, acc)
-  in go init []
-
 (* classifications of characters *)
 
 let is_space c =
@@ -127,7 +116,7 @@ let rec try_parse ~(top_level: bool) state: form option * state =
                             (Char.escaped c))
 
 and parse_many ~top_level state: form list * state =
-  unfold ~f:(try_parse ~top_level) state
+  Utils.unfold (try_parse ~top_level) state
 
 (* the global parsing function *)
 

@@ -1,3 +1,7 @@
+(* takes a generator `f` (that transforms state and returns an intermediate value) and
+ * returns the final state and a list of all intermediate values *)
+val unfold: ('a -> 'b option * 'a) -> 'a -> 'b list * 'a
+
 (* create a sequence of a given length by applying a function to the index *)
 val seq_init: int -> (int -> 'a) -> 'a Seq.t
 

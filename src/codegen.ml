@@ -202,8 +202,7 @@ let gen_code (expr_data: Expr.global_writers) =
     Register.write_ctx rctx buf;
     let rec loop = function
       | [] ->
-        bprintf buf "  %treturn NIL;\n"
-          proc_data.after
+        raise (Invalid_argument "empty function")
       | [final] ->
         bprintf buf "  %t\n  %treturn %t;\n"
           final

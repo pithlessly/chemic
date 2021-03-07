@@ -136,34 +136,13 @@ void deinit(Obj a) {
     }
 }
 
-static struct {
-    Obj *buf;
-    size_t len;
-    size_t cap;
-} args = { NULL, 0, 0 };
-
-void arg_init(size_t n) {
-    args.len = 0;
-    if (n > args.cap) {
-        // round up to avoid reallocating frequently
-        args.cap = (n | 7) + 1;
-        args.buf = realloc(args.buf, args.cap * sizeof(Obj));
-        if (args.buf == NULL) {
-            DIE("out of memory");
-        }
-    }
-}
-
-void arg_push(Obj a) {
-    args.buf[args.len] = a;
-    args.len++;
-}
+ArgVec call_args = { NULL, 0, 0 };
 
 static void arg_clear() {
-    for (size_t i = 0; i < args.len; i++) {
-        deinit(args.buf[i]);
+    for (size_t i = 0; i < call_args.len; i++) {
+        deinit(call_args.buf[i]);
     }
-    args.len = 0;
+    call_args.len = 0;
 }
 
 Obj call(Obj a) {
@@ -175,5 +154,5 @@ Obj call(Obj a) {
 
 void finalize() {
     arg_clear();
-    free(args.buf);
+    free(call_args.buf);
 }

@@ -36,6 +36,16 @@ typedef struct Cons_s {
     Obj cdr;
 } Cons;
 
+typedef struct {
+    Obj *buf;
+    size_t len;
+    size_t cap;
+} ArgVec;
+
+/*= shared global variables =*/
+
+extern ArgVec call_args;
+
 /*= macros/inline functions =*/
 
 inline static char const* classify(Tag t) {
@@ -87,6 +97,23 @@ inline static char const* classify(Tag t) {
 
 #define NIL (Obj) {tag_nil}
 #define MAKE_NIL(T) T.tag = tag_nil
+
+/* inline */ static void arg_init(size_t n) {
+    call_args.len = 0;
+    if (n > call_args.cap) {
+        // round up to avoid reallocating frequently
+        call_args.cap = (n | 7) + 1;
+        call_args.buf = realloc(call_args.buf, call_args.cap * sizeof(Obj));
+        if (call_args.buf == NULL) {
+            DIE("out of memory");
+        }
+    }
+}
+
+inline static void arg_push(Obj a) {
+    call_args.buf[call_args.len] = a;
+    call_args.len++;
+}
 
 /*= external functions =*/
 

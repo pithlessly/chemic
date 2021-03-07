@@ -34,17 +34,30 @@ type expr =
 module StringMap = Map.Make(String)
 module IntMap = Map.Make(Int)
 
+(* Tracks how a local variable came to be in scope. *)
+type local_source =
+  (* If it was declared as a parameter, it should be initialized
+   * to the value of that parameter. *)
+  | Param_source
+  (* If it was declared using 'define', it should be initialized
+   * to NIL because it can be used before it is initialized. *)
+  | Define_source
+  (* If it was declared using 'let', it can be left uninitialized
+   * because there is no way to access it prior to initialization. *)
+  | Let_source
+
 type local_ctx = {
-  (* Tracks whether each variable was declared using 'define' (in
-   * which case it should be initialized to NIL because it can be
-   * used before it is initialized) or using 'let' (in which case
-   * it can be left uninitialized. *)
-  mutable var_metadata: bool IntMap.t;
+  mutable var_metadata: local_source IntMap.t;
+}
+
+type local = {
+  lctx: local_ctx;
+  body: expr list;
 }
 
 type proc = {
-  locals: local_ctx;
-  body: expr list;
+  local: local;
+  num_params: int;
 }
 
 type global_ctx = {
@@ -109,14 +122,14 @@ let build_with ~(gctx: global_ctx) =
         find_defined_vars body
         |> Utils.seq_mapi (fun i var ->
             let id = id_offset + i in
-            lctx.var_metadata <- IntMap.add id true lctx.var_metadata;
+            lctx.var_metadata <- IntMap.add id Define_source lctx.var_metadata;
             (var, id)
           )
         |> StringMap.of_seq
       in
       let var_id = id_offset + StringMap.cardinal scope in
       let scope = StringMap.add lhs var_id scope in
-      lctx.var_metadata <- IntMap.add var_id false lctx.var_metadata;
+      lctx.var_metadata <- IntMap.add var_id Let_source lctx.var_metadata;
       let recurse_rhs =
         go ~lctx ~local_scopes ~block_level:false
       in
@@ -127,13 +140,27 @@ let build_with ~(gctx: global_ctx) =
             rhs = recurse_rhs rhs;
             body = List.map recurse_body body }
 
-    | List (Ident "lambda" :: body) ->
+    | List (Ident "lambda" :: List params :: body) ->
       let lctx = { var_metadata = IntMap.empty } in
-      let scope =
+
+      (* get sequences of two kinds of local variables and their sources *)
+      let param_vars =
+        List.to_seq params
+        |> Seq.map (function
+            | Ident var -> (var, Param_source)
+            | _ -> raise (Invalid_argument "lambda parameters must be identifiers"))
+      in
+      let defined_vars =
         find_defined_vars body
-        |> Utils.seq_mapi (fun i var ->
+        |> Seq.map (fun var -> (var, Define_source))
+      in
+
+      (* construct the initial scope containing those variables *)
+      let scope =
+        Seq.append param_vars defined_vars
+        |> Utils.seq_mapi (fun i (var, source) ->
             let id = i in
-            lctx.var_metadata <- IntMap.add id true lctx.var_metadata;
+            lctx.var_metadata <- IntMap.add id source lctx.var_metadata;
             (var, id)
           )
         |> StringMap.of_seq
@@ -141,8 +168,9 @@ let build_with ~(gctx: global_ctx) =
       let recurse =
         go ~lctx ~local_scopes:[scope] ~block_level:true
       in
-      gctx.procs <- { locals = lctx;
-                      body = List.map recurse body } :: gctx.procs;
+      let local = { lctx; body = List.map recurse body } in
+      gctx.procs <- { num_params = List.length params;
+                      local } :: gctx.procs;
       let id = gctx.num_procs in
       gctx.num_procs <- id + 1;
       Lambda id
@@ -188,7 +216,7 @@ let build_with ~(gctx: global_ctx) =
         let id = i in
         gctx.globals <- StringMap.add var id gctx.globals;
       );
-    { locals = lctx;
+    { lctx;
       body = List.map (go ~lctx ~local_scopes:[] ~block_level:true) forms }
 
 let bprintf = Printf.bprintf
@@ -199,35 +227,52 @@ type local_writers = {
   body: expr list;
 }
 
-let write_local { locals; body } =
+let write_local { lctx = { var_metadata }; body } =
   { before =
-      (if IntMap.cardinal locals.var_metadata = 0 then
+      (if IntMap.cardinal var_metadata = 0 then
          Writer.empty
        else
          let decls =
-           IntMap.to_seq locals.var_metadata
-           |> Seq.map (fun (i, is_define) buf ->
-               bprintf buf (if is_define then
-                              "LOC%d=NIL"
-                            else
-                              "LOC%d") i
+           IntMap.to_seq var_metadata
+           |> Seq.map (fun (i, source) buf ->
+               bprintf buf
+                 (match source with
+                  (* the C standard rqeuires that there is a sequence point
+                   * between declarations of variables, so our usage of an
+                   * unsafe macro here is OK *)
+                  | Param_source -> "LOC%d=UNSAFE_NEXT_ARG"
+                  | Define_source -> "LOC%d=NIL"
+                  | Let_source -> "LOC%d"
+                 ) i
              )
            |> Writer.join ','
          in
-         fun buf -> bprintf buf "  Obj %t;\n" decls);
+         fun buf -> bprintf buf "  Obj %t;\n" decls
+      );
 
     after =
       (fun buf ->
-         IntMap.iter (fun i is_define ->
-             if is_define then
+         var_metadata |> IntMap.iter (fun i source ->
+             match source with
+             | Param_source
+             | Define_source ->
                bprintf buf "deinit(LOC%d);" i
-           ) locals.var_metadata);
+             | Let_source ->
+               ()
+           )
+      );
 
     body }
 
+type proc_writers = {
+  name: Writer.t;
+  num_params: int;
+  local: local_writers;
+}
+
 type global_writers = {
   decls: Writer.t;
-  procs: (Writer.t * local_writers) list;
+  procs: proc_writers list;
   main: local_writers;
   more_after_main: Writer.t;
 }
@@ -281,9 +326,10 @@ let build forms =
 
     procs =
       List.rev gctx.procs
-      |> List.mapi (fun i proc ->
-          ((fun buf -> bprintf buf "PROC%d" i),
-           write_local proc));
+      |> List.mapi (fun i (proc: proc) ->
+          { name = (fun buf -> bprintf buf "PROC%d" i);
+            num_params = proc.num_params;
+            local = write_local proc.local });
 
     main = write_local main;
 

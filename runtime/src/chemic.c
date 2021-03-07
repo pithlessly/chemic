@@ -146,8 +146,6 @@ static void arg_clear() {
 }
 
 Obj call(Obj a) {
-    // just ignore all the arguments since procedures can't actually take them yet
-    arg_clear();
     EXPECT(a, tag_proc);
     return a.data.p();
 }

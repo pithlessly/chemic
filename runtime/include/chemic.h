@@ -115,6 +115,20 @@ inline static void arg_push(Obj a) {
     call_args.len++;
 }
 
+// This macro is unsafe because it also declares a local variable
+// as a counter in the scope where it is used
+#define UNSAFE_EXPECT_ARGS(N) \
+    if (call_args.len != N) { \
+        FDIE("wrong number of arguments: procedure expected %d, got %zu", \
+                N, call_args.len); \
+    } \
+    call_args.len = 0; \
+    size_t arg_i = 0;
+
+// This macro is unsafe because it uses the variable defined in the above macro
+#define UNSAFE_NEXT_ARG \
+    call_args.buf[arg_i++]
+
 /*= external functions =*/
 
 extern void arg_init(size_t n);

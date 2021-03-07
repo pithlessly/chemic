@@ -194,11 +194,12 @@ let write_expr ~rctx =
 let gen_code (expr_data: Expr.global_writers) =
   let buf = Buffer.create 2048 in
 
-  let write_proc_body (name, (proc_data: Expr.local_writers)) =
+  let write_proc_body (proc: Expr.proc_writers) =
     let rctx = Register.init () in
-    let body = List.map (write_expr ~rctx) proc_data.body in
-    bprintf buf "Obj %t() {\n" name;
-    proc_data.before buf;
+    let body = List.map (write_expr ~rctx) proc.local.body in
+    bprintf buf "Obj %t() {\n" proc.name;
+    bprintf buf "  UNSAFE_EXPECT_ARGS(%d);\n" proc.num_params;
+    proc.local.before buf;
     Register.write_ctx rctx buf;
     let rec loop = function
       | [] ->
@@ -206,7 +207,7 @@ let gen_code (expr_data: Expr.global_writers) =
       | [final] ->
         bprintf buf "  %t\n  %treturn %t;\n"
           final
-          proc_data.after
+          proc.local.after
           (Register.write (Register.zero rctx))
       | expr :: rest ->
         bprintf buf "  %tdeinit(%t);\n"

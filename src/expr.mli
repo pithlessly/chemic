@@ -33,6 +33,7 @@ type expr =
   | Lambda of proc_id
   | Builtin of op * expr list
 
+(* writer data common to both procedures and the top-level *)
 type local_writers = {
   (* declarations to be placed at the start of the procedure *)
   before: Writer.t;
@@ -42,11 +43,20 @@ type local_writers = {
   body: expr list;
 }
 
+(* writer data needed for procedures *)
+type proc_writers = {
+  (* an identifier that can be used as the name of the procedure *)
+  name: Writer.t;
+  (* the number of parameters that the procedure takes *)
+  num_params: int;
+  local: local_writers;
+}
+
 type global_writers = {
   (* declarations to be placed before main() *)
   decls: Writer.t;
-  (* procedure names and the information needed to define them *)
-  procs: (Writer.t * local_writers) list;
+  (* information needed to define procedures *)
+  procs: proc_writers list;
   (* information needed in main() *)
   main: local_writers;
   (* additional statements to be placed at the end of main() *)

@@ -28,7 +28,7 @@ type expr =
   | Var of var_id
   | Define of var_id * expr
   | Let of { lhs: local_var_id; rhs: expr; body: expr list }
-  | Proc of proc_id
+  | Lambda of proc_id
   | Builtin of op * expr list
 
 module StringMap = Map.Make(String)
@@ -127,7 +127,7 @@ let build_with ~(gctx: global_ctx) =
             rhs = recurse_rhs rhs;
             body = List.map recurse_body body }
 
-    | List (Ident "proc" :: body) ->
+    | List (Ident "lambda" :: body) ->
       let lctx = { var_metadata = IntMap.empty } in
       let scope =
         find_defined_vars body
@@ -145,7 +145,7 @@ let build_with ~(gctx: global_ctx) =
                       body = List.map recurse body } :: gctx.procs;
       let id = gctx.num_procs in
       gctx.num_procs <- id + 1;
-      Proc id
+      Lambda id
 
     | List (f :: args) ->
       let recurse = go ~lctx ~local_scopes ~block_level:false in

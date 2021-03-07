@@ -30,7 +30,7 @@ type expr =
   | Var of var_id
   | Define of var_id * expr
   | Let of { lhs: local_var_id; rhs: expr; body: expr list }
-  | Proc of proc_id
+  | Lambda of proc_id
   | Builtin of op * expr list
 
 type local_writers = {

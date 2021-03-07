@@ -13,7 +13,7 @@ type expr = Expr.expr =
   | Var of Expr.var_id
   | Define of Expr.var_id * expr
   | Let of { lhs: Expr.local_var_id; rhs: expr; body: expr list }
-  | Proc of Expr.proc_id
+  | Lambda of Expr.proc_id
   | Builtin of op * expr list
 
 let bprintf = Printf.bprintf
@@ -100,7 +100,7 @@ let write_expr ~rctx =
         loop body;
         deinit buf
 
-    | Proc id ->
+    | Lambda id ->
       let proc = Expr.write_access_proc id in
       fun buf -> bprintf buf "MAKE_PROC(%t,%t);" (Register.write reg) proc
 

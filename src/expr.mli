@@ -67,23 +67,4 @@ val build: Parse.form list -> global_writers
 
 val write_access_string: string_id -> Writer.t
 val write_access_proc: proc_id -> Writer.t
-(* return a pair of writers that emit:
- * - a series of statements
- * - an identifier that, after those statements have been executed,
- *   contains the desired variable
- *)
-val write_access_var: var_id -> Writer.t * Writer.t
-(* return a pair of writers that emit:
- * - a series of statements
- * - an identifier that, after those statements have been executed,
- *   can be assigned to in order to modify the desired variable
- *   with (define)
- *)
-val write_assign_var: var_id -> Writer.t * Writer.t
-(* return a pair of writers that emit:
- * - an identifier that can be assigned to in order to initialize
- *   the desired variable at the beginning of the (let) block
- * - a series of statements that can be used to deinitialize the
- *   desired variable at the end of the (let) block
- *)
-val write_let_var: local_var_id -> Writer.t * Writer.t
+val write_access_var: var_id -> Writer.t

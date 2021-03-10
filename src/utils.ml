@@ -37,3 +37,7 @@ let rec search f =
     match f x with
     | Some res -> Some res
     | None -> search f xs
+
+let null = function
+  | [] -> true
+  | _ -> false

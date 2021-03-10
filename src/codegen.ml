@@ -68,37 +68,26 @@ let write_expr ~rctx =
       fun buf -> bprintf buf "MAKE_STRING(%t,%t);" (Register.write reg) str
 
     | Var id ->
-      let prelude, ident = Expr.write_access_var id in
-      fun buf -> bprintf buf "%t%t=%t;" prelude (Register.write reg) ident
+      fun buf -> bprintf buf "%t=%t;" (Register.write reg) (Expr.write_access_var id)
 
     | Define (id, x) ->
       let expr = go ~reg x in
-      let prelude, ident = Expr.write_assign_var id in
+      let var = Expr.write_access_var id in
+      let reg = Register.write reg in
       fun buf ->
-        expr buf;
-        prelude buf;
-        bprintf buf "%t=%t;MAKE_NIL(%t);"
-          ident (Register.write reg) (Register.write reg)
+        bprintf buf "%t%t=%t;MAKE_NIL(%t);" expr var reg reg
 
     | Let { lhs; rhs; body } ->
       let rhs = go ~reg rhs in
-      let ident, deinit = Expr.write_let_var lhs in
+      let var = Expr.write_access_var (Expr.Local lhs) in
       let body = List.map (go ~reg) body in
       fun buf ->
         rhs buf;
-        bprintf buf "%t=%t;" ident (Register.write reg);
-        let rec loop = function
-          | [] ->
-            raise (Invalid_argument "let block is empty")
-          | [final] ->
-            final buf
-          | expr :: rest ->
-            expr buf;
-            bprintf buf "deinit(%t);" (Register.write reg);
-            loop rest
-        in
-        loop body;
-        deinit buf
+        bprintf buf "%t=%t;" var (Register.write reg);
+        if Utils.null body then
+          raise (Invalid_argument "let block is empty");
+        body |> List.iter (bprintf buf "%t");
+        bprintf buf "MAKE_NIL(%t);" var
 
     | Lambda id ->
       let proc = Expr.write_access_proc id in
@@ -201,21 +190,12 @@ let gen_code (expr_data: Expr.global_writers) =
     bprintf buf "  UNSAFE_EXPECT_ARGS(%d);\n" proc.num_params;
     proc.local.before buf;
     Register.write_ctx rctx buf;
-    let rec loop = function
-      | [] ->
-        raise (Invalid_argument "empty function")
-      | [final] ->
-        bprintf buf "  %t\n  %treturn %t;\n"
-          final
-          proc.local.after
-          (Register.write (Register.zero rctx))
-      | expr :: rest ->
-        bprintf buf "  %tdeinit(%t);\n"
-          expr
-          (Register.write (Register.zero rctx));
-        loop rest
-    in
-    loop body;
+    if Utils.null body then
+      raise (Invalid_argument "empty function");
+    body |> List.iter (bprintf buf "  %t\n");
+    bprintf buf "  %treturn %t;\n"
+      proc.local.after
+      (Register.write (Register.zero rctx));
     Buffer.add_string buf "}\n";
   in
 
@@ -230,11 +210,7 @@ let gen_code (expr_data: Expr.global_writers) =
   (* emit declaration of necessary registers *)
   Register.write_ctx rctx buf;
   (* emit program statements *)
-  top_level |> List.iter (fun writer ->
-      bprintf buf "  %tdeinit(%t);\n"
-        writer
-        (Register.write (Register.zero rctx))
-    );
+  top_level |> List.iter (bprintf buf "  %t\n");
   Buffer.add_string buf "  ";
   expr_data.main.after buf;
   expr_data.more_after_main buf;

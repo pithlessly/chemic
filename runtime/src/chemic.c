@@ -43,7 +43,6 @@ Obj mul(Obj a, Obj b) {
 Obj len(Obj a) {
     EXPECT(a, tag_str);
     size_t len = a.data.s->len;
-    deinit(a);
     MAKE_INT(a, len);
     return a;
 }
@@ -55,30 +54,6 @@ Obj cons(Obj a, Obj b) {
     a.tag = tag_cons;
     a.data.c = c;
     return a;
-}
-
-inline static void str_del(Str *s) {
-    if (s->ref_count > 0) {
-        s->ref_count--;
-        if (s->ref_count == 0) {
-            free(s);
-        }
-    }
-}
-
-void clone(Obj a) {
-    switch (a.tag) {
-        case tag_nil:
-        case tag_int:
-        case tag_proc:
-        case tag_cons:
-            break;
-        case tag_str:
-            if (a.data.s->ref_count > 0) {
-                a.data.s->ref_count++;
-            }
-            break;
-    }
 }
 
 static void display_cons_items(Cons c) {
@@ -121,27 +96,9 @@ void display(Obj a) {
     }
 }
 
-void deinit(Obj a) {
-    switch (a.tag) {
-        case tag_nil:
-        case tag_int:
-        case tag_proc:
-            break;
-        case tag_str:
-            str_del(a.data.s);
-            break;
-        case tag_cons:
-            /* TODO: garbage collection */
-            break;
-    }
-}
-
 ArgVec call_args = { NULL, 0, 0 };
 
 static void arg_clear() {
-    for (size_t i = 0; i < call_args.len; i++) {
-        deinit(call_args.buf[i]);
-    }
     call_args.len = 0;
 }
 
@@ -151,6 +108,5 @@ Obj call(Obj a) {
 }
 
 void finalize() {
-    arg_clear();
     free(call_args.buf);
 }

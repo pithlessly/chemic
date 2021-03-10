@@ -250,17 +250,7 @@ let write_local { lctx = { var_metadata }; body } =
          fun buf -> bprintf buf "  Obj %t;\n" decls
       );
 
-    after =
-      (fun buf ->
-         var_metadata |> IntMap.iter (fun i source ->
-             match source with
-             | Param_source
-             | Define_source ->
-               bprintf buf "deinit(LOC%d);" i
-             | Let_source ->
-               ()
-           )
-      );
+    after = Writer.empty;
 
     body }
 
@@ -297,10 +287,9 @@ let build forms =
         |> List.to_seq
         |> Utils.seq_mapi (fun i lit ->
             fun buf ->
-              bprintf buf "STR%d={%d,0,%t}"
+              bprintf buf "STR%d={%d,%t}"
                 i
                 (String.length lit) (* 'len' field *)
-                (* 'ref_count' field is 0 to indicate it should never be freed *)
                 (Writer.c_string lit) (* 'data' field *)
           )
         |> Writer.join ','
@@ -333,11 +322,7 @@ let build forms =
 
     main = write_local main;
 
-    more_after_main =
-      (fun buf ->
-         for i = 0 to num_globals - 1 do
-           bprintf buf "deinit(GLO%d);" i
-         done)
+    more_after_main = Writer.empty;
   }
 
 let write_access_string id =
@@ -346,18 +331,6 @@ let write_access_string id =
 let write_access_proc id =
   fun buf -> bprintf buf "&PROC%d" id
 
-let write_var = function
+let write_access_var = function
   | Global id -> fun buf -> bprintf buf "GLO%d" id
   | Local id -> fun buf -> bprintf buf "LOC%d" id
-
-let write_access_var id =
-  let var = write_var id in
-  ((fun buf -> bprintf buf "clone(%t);" var), var)
-
-let write_assign_var id =
-  let var = write_var id in
-  ((fun buf -> bprintf buf "deinit(%t);" var), var)
-
-let write_let_var id =
-  let var = write_var (Local id) in
-  (var, (fun buf -> bprintf buf "deinit(%t);" var))

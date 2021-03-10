@@ -13,3 +13,6 @@ val seq_iteri: (int -> 'a -> unit) -> 'a Seq.t -> unit
 
 (* return the first 'Some _' value returned by the function for an element in the list *)
 val search: ('a -> 'b option) -> 'a list -> 'b option
+
+(* determine if a list is empty *)
+val null: 'a list -> bool

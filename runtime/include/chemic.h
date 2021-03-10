@@ -13,9 +13,6 @@ typedef enum { tag_nil, tag_int, tag_proc, tag_str, tag_cons } Tag;
 
 typedef struct {
     size_t len;
-    // number of owning references to this string
-    // (if zero, this is a static string that should never be freed)
-    size_t ref_count;
     uint8_t data[];
 } Str;
 
@@ -73,7 +70,6 @@ inline static char const* classify(Tag t) {
 // if T is not the expected type, take ownership of T and raise an error
 #define EXPECT(T, TAG) \
     if (T.tag != TAG) { \
-        deinit(T); \
         FDIE("expected %s, got %s", classify(TAG), classify(T.tag)); \
     } else (void) 0
 
@@ -143,9 +139,8 @@ extern Obj len(Obj a);
 extern Obj cons(Obj a, Obj b);
 extern Obj call(Obj a);
 extern void arg_push(Obj a);
-extern void deinit(Obj a);
+
 // do not take ownership of their argument
-extern void clone(Obj a);
 extern void display(Obj a);
 
 #endif /* CHEMIC_H */

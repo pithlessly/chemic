@@ -229,26 +229,21 @@ type local_writers = {
 
 let write_local { lctx = { var_metadata }; body } =
   { before =
-      (if IntMap.cardinal var_metadata = 0 then
-         Writer.empty
-       else
-         let decls =
-           IntMap.to_seq var_metadata
-           |> Seq.map (fun (i, source) buf ->
-               bprintf buf
-                 (match source with
-                  (* the C standard rqeuires that there is a sequence point
-                   * between declarations of variables, so our usage of an
-                   * unsafe macro here is OK *)
-                  | Param_source -> "LOC%d=UNSAFE_NEXT_ARG"
-                  | Define_source -> "LOC%d=NIL"
-                  | Let_source -> "LOC%d"
-                 ) i
-             )
-           |> Writer.join ','
-         in
-         fun buf -> bprintf buf "  Obj %t;\n" decls
-      );
+      (let decls =
+         IntMap.to_seq var_metadata
+         |> Seq.map (fun (_, source) buf ->
+             Buffer.add_string buf
+               (match source with
+                | Param_source -> "UNSAFE_NEXT_ARG"
+                | Define_source
+                | Let_source -> "NIL")
+           )
+         |> Writer.join ','
+       in
+       fun buf ->
+         bprintf buf "  Obj l[%d]={%t};\n"
+           (IntMap.cardinal var_metadata)
+           decls);
 
     after = Writer.empty;
 
@@ -333,4 +328,4 @@ let write_access_proc id =
 
 let write_access_var = function
   | Global id -> fun buf -> bprintf buf "GLO%d" id
-  | Local id -> fun buf -> bprintf buf "LOC%d" id
+  | Local id -> fun buf -> bprintf buf "l[%d]" id

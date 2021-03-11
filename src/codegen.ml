@@ -55,6 +55,10 @@ end = struct
       Writer.empty
 end
 
+let write_access_var = function
+  | Expr.Global id -> fun buf -> bprintf buf "GLO%d" id
+  | Expr.Local id -> fun buf -> bprintf buf "l[%d]" id
+
 (* Return a Writer.t that emits a sequence of statements which have the
  * effect of evaluating the given expression and assigning the return value
  * to the given register. *)
@@ -68,18 +72,18 @@ let write_expr ~rctx =
       fun buf -> bprintf buf "MAKE_STRING(%t,%t);" (Register.write reg) str
 
     | Var id ->
-      fun buf -> bprintf buf "%t=%t;" (Register.write reg) (Expr.write_access_var id)
+      fun buf -> bprintf buf "%t=%t;" (Register.write reg) (write_access_var id)
 
     | Define (id, x) ->
       let expr = go ~reg x in
-      let var = Expr.write_access_var id in
+      let var = write_access_var id in
       let reg = Register.write reg in
       fun buf ->
         bprintf buf "%t%t=%t;MAKE_NIL(%t);" expr var reg reg
 
     | Let { lhs; rhs; body } ->
       let rhs = go ~reg rhs in
-      let var = Expr.write_access_var (Expr.Local lhs) in
+      let var = write_access_var (Expr.Local lhs) in
       let body = List.map (go ~reg) body in
       fun buf ->
         rhs buf;
@@ -123,6 +127,7 @@ let write_expr ~rctx =
       (* TODO: evaluation order is unspecified according to the standard,
        * but maybe it's still a little strange that the function argument
        * is only evaluated after all the others? *)
+        (* TODO: fix this - we need to finish the codegen pass before we write anything *)
       let n_args = List.length args in
       let args = List.map (go ~reg) args in
       fun buf ->
@@ -188,14 +193,16 @@ let gen_code (expr_data: Expr.global_writers) =
     let body = List.map (write_expr ~rctx) proc.local.body in
     bprintf buf "Obj %t() {\n" proc.name;
     bprintf buf "  UNSAFE_EXPECT_ARGS(%d);\n" proc.num_params;
-    proc.local.before buf;
+    bprintf buf "  Obj l[%d]={%t};\n"
+      proc.local.num_decls
+      (proc.local.local_decls
+       |> Seq.map (Fun.flip Buffer.add_string)
+       |> Writer.join ',');
     Register.write_ctx rctx buf;
     if Utils.null body then
       raise (Invalid_argument "empty function");
     body |> List.iter (bprintf buf "  %t\n");
-    bprintf buf "  %treturn %t;\n"
-      proc.local.after
-      (Register.write (Register.zero rctx));
+    bprintf buf "  return %t;\n" (Register.write (Register.zero rctx));
     Buffer.add_string buf "}\n";
   in
 
@@ -206,13 +213,16 @@ let gen_code (expr_data: Expr.global_writers) =
   expr_data.decls buf;
   expr_data.procs |> List.iter write_proc_body;
   Buffer.add_string buf "int main(){\n";
-  expr_data.main.before buf;
+  bprintf buf "  Obj l[%d]={%t};\n"
+    expr_data.main.num_decls
+    (expr_data.main.local_decls
+     |> Seq.map (Fun.flip Buffer.add_string)
+     |> Writer.join ',');
   (* emit declaration of necessary registers *)
   Register.write_ctx rctx buf;
   (* emit program statements *)
   top_level |> List.iter (bprintf buf "  %t\n");
   Buffer.add_string buf "  ";
-  expr_data.main.after buf;
-  expr_data.more_after_main buf;
+  expr_data.after_main buf;
   Buffer.add_string buf "finalize();\n  return 0;\n}\n";
   Buffer.contents buf

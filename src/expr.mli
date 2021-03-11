@@ -2,9 +2,9 @@
  * information into symbol tables, etc. in the process. *)
 
 (* a token identifying a global variable *)
-type global_var_id
+type global_var_id = int
 (* a token identifying a local variable *)
-type local_var_id
+type local_var_id = int
 
 type var_id =
   | Global of global_var_id
@@ -35,10 +35,11 @@ type expr =
 
 (* writer data common to both procedures and the top-level *)
 type local_writers = {
-  (* declarations to be placed at the start of the procedure *)
-  before: Writer.t;
-  (* statements to run before returning from the procedure *)
-  after: Writer.t;
+  (* expressions to initialize local variables, to be placed
+   * at the start of the procedure *)
+  local_decls: string Seq.t;
+  (* the length of `local_decls` *)
+  num_decls: int;
   (* the body of the procedure *)
   body: expr list;
 }
@@ -60,11 +61,10 @@ type global_writers = {
   (* information needed in main() *)
   main: local_writers;
   (* additional statements to be placed at the end of main() *)
-  more_after_main: Writer.t;
+  after_main: Writer.t;
 }
 
 val build: Parse.form list -> global_writers
 
 val write_access_string: string_id -> Writer.t
 val write_access_proc: proc_id -> Writer.t
-val write_access_var: var_id -> Writer.t

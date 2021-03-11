@@ -222,32 +222,20 @@ let build_with ~(gctx: global_ctx) =
 let bprintf = Printf.bprintf
 
 type local_writers = {
-  before: Writer.t;
-  after: Writer.t;
+  local_decls: string Seq.t;
+  num_decls: int;
   body: expr list;
 }
 
 let write_local { lctx = { var_metadata }; body } =
-  { before =
-      (let decls =
-         IntMap.to_seq var_metadata
-         |> Seq.map (fun (_, source) buf ->
-             Buffer.add_string buf
-               (match source with
-                | Param_source -> "UNSAFE_NEXT_ARG"
-                | Define_source
-                | Let_source -> "NIL")
-           )
-         |> Writer.join ','
-       in
-       fun buf ->
-         bprintf buf "  Obj l[%d]={%t};\n"
-           (IntMap.cardinal var_metadata)
-           decls);
-
-    after = Writer.empty;
-
-    body }
+  let local_decls =
+    IntMap.to_seq var_metadata
+    |> Seq.map (function
+        | _, Param_source -> "UNSAFE_NEXT_ARG"
+        | _, Define_source
+        | _, Let_source -> "NIL")
+  in
+  { local_decls; num_decls = IntMap.cardinal var_metadata; body }
 
 type proc_writers = {
   name: Writer.t;
@@ -259,7 +247,7 @@ type global_writers = {
   decls: Writer.t;
   procs: proc_writers list;
   main: local_writers;
-  more_after_main: Writer.t;
+  after_main: Writer.t;
 }
 
 let build forms =
@@ -317,7 +305,7 @@ let build forms =
 
     main = write_local main;
 
-    more_after_main = Writer.empty;
+    after_main = Writer.empty;
   }
 
 let write_access_string id =
@@ -325,7 +313,3 @@ let write_access_string id =
 
 let write_access_proc id =
   fun buf -> bprintf buf "&PROC%d" id
-
-let write_access_var = function
-  | Global id -> fun buf -> bprintf buf "GLO%d" id
-  | Local id -> fun buf -> bprintf buf "l[%d]" id

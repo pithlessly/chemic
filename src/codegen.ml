@@ -124,19 +124,20 @@ let write_expr ~rctx =
       binary_fun ~reg ~r_rhs ~name:"cons" (go ~reg a) b
 
     | Builtin (Call, f :: args) ->
-      (* TODO: evaluation order is unspecified according to the standard,
-       * but maybe it's still a little strange that the function argument
-       * is only evaluated after all the others? *)
-        (* TODO: fix this - we need to finish the codegen pass before we write anything *)
+      let write_fn = go ~reg f in
       let n_args = List.length args in
-      let args = List.map (go ~reg) args in
+      let expr_reg = Register.next rctx reg in
+      let args = List.map (go ~reg:expr_reg) args in
       fun buf ->
+        write_fn buf;
         bprintf buf "arg_init(%d);" n_args;
         args |> List.iter (fun write_compute_arg ->
             write_compute_arg buf;
-            bprintf buf "arg_push(%t);" (Register.write reg)
+            bprintf buf "arg_push(%t);" (Register.write expr_reg)
           );
-        unary_fun ~reg ~name:"call" f buf
+        bprintf buf "%t=call(%t);"
+          (Register.write reg)
+          (Register.write reg)
 
     | Builtin (Minus, [])
     | Builtin (Len, _)

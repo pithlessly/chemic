@@ -141,6 +141,9 @@ let build_with ~(gctx: global_ctx) =
             body = List.map recurse_body body }
 
     | List (Ident "lambda" :: List params :: body) ->
+      if Utils.null body then
+        raise (Invalid_argument "lambda body cannot be empty");
+
       let lctx = { var_metadata = IntMap.empty } in
 
       (* get sequences of two kinds of local variables and their sources *)

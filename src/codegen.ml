@@ -29,9 +29,9 @@ module Register: sig
   val zero: ctx -> t
   (* return the next register *)
   val next: ctx -> t -> t
-  (* write any declarations necessary for the registers to be used *)
-  val write_ctx: ctx -> Writer.t
-  (* write as a C identifier *)
+  (* get the total number of registers currently being used *)
+  val allocated: ctx -> int
+  (* write as a C lvalue *)
   val write: t -> Writer.t
 end = struct
   (* stores the highest register not yet used *)
@@ -44,20 +44,13 @@ end = struct
     r + 1
   let zero ctx = next ctx (-1)
 
-  let write r buf = bprintf buf "r%d" r
-
-  let write_ctx ctx =
-    if !ctx > 0 then
-      (* "Obj r0,r1,r2..." *)
-      let reg_list = Writer.join ',' (Utils.seq_init !ctx write) in
-      fun buf -> bprintf buf "  Obj %t;\n" reg_list
-    else
-      Writer.empty
+  let allocated ctx = !ctx
+  let write r buf = bprintf buf "r[REG+%d]" r
 end
 
 let write_access_var = function
   | Expr.Global id -> fun buf -> bprintf buf "GLO%d" id
-  | Expr.Local id -> fun buf -> bprintf buf "l[%d]" id
+  | Expr.Local id -> fun buf -> bprintf buf "r[%d]" id
 
 (* Return a Writer.t that emits a sequence of statements which have the
  * effect of evaluating the given expression and assigning the return value
@@ -77,9 +70,12 @@ let write_expr ~rctx =
     | Define (id, x) ->
       let expr = go ~reg x in
       let var = write_access_var id in
-      let reg = Register.write reg in
       fun buf ->
-        bprintf buf "%t%t=%t;MAKE_NIL(%t);" expr var reg reg
+        bprintf buf "%t%t=%t;MAKE_NIL(%t);"
+          expr
+          var
+          (Register.write reg)
+          (Register.write reg)
 
     | Let { lhs; rhs; body } ->
       let rhs = go ~reg rhs in
@@ -184,46 +180,50 @@ let write_expr ~rctx =
 
   in fun expr -> go ~reg:(Register.zero rctx) expr
 
-(* Convert a list of expressions into a C program that evaluates each one in turn
- * and discards the results. *)
-let gen_code (expr_data: Expr.global_writers) =
-  let buf = Buffer.create 2048 in
+(* Write the content of a function body which is common to both
+ * procedures and the top level *)
+let write_local (local: Expr.local_writers) =
+  let rctx = Register.init () in
+  let body = List.map (write_expr ~rctx) local.body in
+  let num_regs = Register.allocated rctx in
 
-  let write_proc_body (proc: Expr.proc_writers) =
-    let rctx = Register.init () in
-    let body = List.map (write_expr ~rctx) proc.local.body in
+  fun buf ->
+    bprintf buf "  Obj r[%d]={%t};\n"
+      (local.num_decls + num_regs)
+      (Utils.seq_replicate num_regs "NIL"
+       |> Seq.append local.local_decls (* NB - these are prepended, not appended *)
+       |> Seq.map (fun s buf -> Buffer.add_string buf s)
+       |> Writer.join ',');
+    bprintf buf "  const size_t REG = %d;\n"
+      local.num_decls;
+    List.iter (bprintf buf "  %t\n") body
+
+(* Write a function implementing the body of a procedure *)
+let write_proc (proc: Expr.proc_writers) =
+  let local = write_local proc.local in
+  fun buf ->
     bprintf buf "Obj %t() {\n" proc.name;
     bprintf buf "  UNSAFE_EXPECT_ARGS(%d);\n" proc.num_params;
-    bprintf buf "  Obj l[%d]={%t};\n"
-      proc.local.num_decls
-      (proc.local.local_decls
-       |> Seq.map (Fun.flip Buffer.add_string)
-       |> Writer.join ',');
-    Register.write_ctx rctx buf;
-    if Utils.null body then
-      raise (Invalid_argument "empty function");
-    body |> List.iter (bprintf buf "  %t\n");
-    bprintf buf "  return %t;\n" (Register.write (Register.zero rctx));
-    Buffer.add_string buf "}\n";
-  in
+    local buf;
+    bprintf buf "  return r[REG];\n}\n"
 
-  let rctx = Register.init () in
-  let top_level = List.map (write_expr ~rctx) expr_data.main.body in
+(* Write main(), implementing the top-level procedure *)
+let write_main (top_level: Expr.local_writers) =
+  let local = write_local top_level in
+  fun buf ->
+    Buffer.add_string buf "int main() {\n";
+    local buf;
+    Buffer.add_string buf "  finalize();\n  return 0;\n}\n"
 
+(* Convert a syntax tree into a C program that evaluates each
+ * top-level expression. *)
+let gen_code (expr_data: Expr.global_writers) =
+  let main = write_main expr_data.main in
+
+  let buf = Buffer.create 2048 in
   Buffer.add_string buf "#include \"chemic.h\"\n";
   expr_data.decls buf;
-  expr_data.procs |> List.iter write_proc_body;
-  Buffer.add_string buf "int main(){\n";
-  bprintf buf "  Obj l[%d]={%t};\n"
-    expr_data.main.num_decls
-    (expr_data.main.local_decls
-     |> Seq.map (Fun.flip Buffer.add_string)
-     |> Writer.join ',');
-  (* emit declaration of necessary registers *)
-  Register.write_ctx rctx buf;
-  (* emit program statements *)
-  top_level |> List.iter (bprintf buf "  %t\n");
-  Buffer.add_string buf "  ";
-  expr_data.after_main buf;
-  Buffer.add_string buf "finalize();\n  return 0;\n}\n";
+  expr_data.procs |> List.iter (fun proc -> write_proc proc buf);
+  main buf;
+
   Buffer.contents buf

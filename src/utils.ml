@@ -30,6 +30,14 @@ let seq_iteri f seq =
       loop (i + 1) xs
   in loop 0 seq
 
+let seq_replicate n x =
+  let rec loop n () =
+    if n > 0 then
+      Seq.Cons (x, loop (n - 1))
+    else
+      Seq.Nil
+  in loop n
+
 let rec search f =
   function
   | [] -> None

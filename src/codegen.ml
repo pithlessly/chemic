@@ -6,6 +6,7 @@ type op = Expr.op =
   | Print
   | Cons
   | Call
+  | Debug
 
 type expr = Expr.expr =
   | Int of int64
@@ -135,11 +136,18 @@ let write_expr ~rctx =
           (Register.write reg)
           (Register.write reg)
 
+    | Builtin (Debug, [x]) ->
+      let expr = go ~reg x in
+      fun buf ->
+        expr buf;
+        Buffer.add_string buf "gc_debug();"
+
     | Builtin (Minus, [])
     | Builtin (Len, _)
     | Builtin (Print, _)
     | Builtin (Cons, _)
-    | Builtin (Call, _) ->
+    | Builtin (Call, _)
+    | Builtin (Debug, _) ->
       raise (Invalid_argument "invalid expression")
 
   (* Helper function to construct a writer which emits code to evaluate a function's
@@ -195,8 +203,8 @@ let write_local (local: Expr.local_writers) =
        |> Seq.append local.local_decls (* NB - these are prepended, not appended *)
        |> Seq.map (fun s buf -> Buffer.add_string buf s)
        |> Writer.join ',');
-    bprintf buf "  gc_push_roots(r, %d);\n" aux_size;
-    bprintf buf "  const size_t REG = %d;\n"
+    bprintf buf "  gc_push_roots(r,%d);\n" aux_size;
+    bprintf buf "  const size_t REG=%d;\n"
       local.num_decls;
     List.iter (bprintf buf "  %t\n") body;
     Buffer.add_string buf "  gc_pop_roots();\n"

@@ -47,8 +47,17 @@ Obj len(Obj a) {
     return a;
 }
 
+struct {
+    size_t allocated;
+} heap = { 0 };
+
 Obj cons(Obj a, Obj b) {
     Cons *c = malloc(sizeof(Cons));
+    if (!c) {
+        DIE("out of memory");
+    }
+    heap.allocated++;
+
     c->car = a;
     c->cdr = b;
     a.tag = tag_cons;
@@ -109,8 +118,12 @@ void gc_push_roots(Obj *roots, size_t count) {
 }
 
 void gc_pop_roots() {
+    // TODO
     printf("popping roots\n");
-    // stub
+}
+
+void gc_debug() {
+    printf("total allocated: %zu\n", heap.allocated);
 }
 
 void finalize() {

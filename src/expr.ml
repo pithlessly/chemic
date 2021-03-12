@@ -12,6 +12,7 @@ type op =
   | Print
   | Cons
   | Call
+  | Debug
 
 type global_var_id = int
 type local_var_id = int
@@ -80,6 +81,7 @@ let get_op = function
   | Ident "display" -> Print
   | Ident "cons" -> Cons
   | Ident "call" -> Call
+  | Ident "dbg" -> Debug
   | Ident s ->
     raise (Invalid_argument (Printf.sprintf "invalid operator: \"%s\""
                                (String.escaped s)))

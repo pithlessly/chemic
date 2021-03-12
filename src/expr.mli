@@ -23,6 +23,7 @@ type op =
   | Print
   | Cons
   | Call
+  | Debug
 
 type expr =
   | Int of int64

@@ -186,17 +186,20 @@ let write_local (local: Expr.local_writers) =
   let rctx = Register.init () in
   let body = List.map (write_expr ~rctx) local.body in
   let num_regs = Register.allocated rctx in
+  let aux_size = local.num_decls + num_regs in
 
   fun buf ->
     bprintf buf "  Obj r[%d]={%t};\n"
-      (local.num_decls + num_regs)
+      aux_size
       (Utils.seq_replicate num_regs "NIL"
        |> Seq.append local.local_decls (* NB - these are prepended, not appended *)
        |> Seq.map (fun s buf -> Buffer.add_string buf s)
        |> Writer.join ',');
+    bprintf buf "  gc_push_roots(r, %d);\n" aux_size;
     bprintf buf "  const size_t REG = %d;\n"
       local.num_decls;
-    List.iter (bprintf buf "  %t\n") body
+    List.iter (bprintf buf "  %t\n") body;
+    Buffer.add_string buf "  gc_pop_roots();\n"
 
 (* Write a function implementing the body of a procedure *)
 let write_proc (proc: Expr.proc_writers) =

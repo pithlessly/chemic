@@ -127,10 +127,6 @@ inline static void arg_push(Obj a) {
 
 /*= external functions =*/
 
-extern void arg_init(size_t n);
-extern void finalize();
-
-// take & return ownership of their arguments
 extern Obj add(Obj a, Obj b);
 extern Obj sub(Obj a, Obj b);
 extern Obj neg(Obj a);
@@ -138,9 +134,10 @@ extern Obj mul(Obj a, Obj b);
 extern Obj len(Obj a);
 extern Obj cons(Obj a, Obj b);
 extern Obj call(Obj a);
-extern void arg_push(Obj a);
-
-// do not take ownership of their argument
 extern void display(Obj a);
+
+extern void gc_push_roots(Obj *roots, size_t count);
+extern void gc_pop_roots();
+extern void finalize();
 
 #endif /* CHEMIC_H */

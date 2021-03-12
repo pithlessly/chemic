@@ -56,6 +56,13 @@ Obj cons(Obj a, Obj b) {
     return a;
 }
 
+ArgVec call_args = { NULL, 0, 0 };
+
+Obj call(Obj a) {
+    EXPECT(a, tag_proc);
+    return a.data.p();
+}
+
 static void display_cons_items(Cons c) {
     while (1) {
         display(c.car);
@@ -96,15 +103,14 @@ void display(Obj a) {
     }
 }
 
-ArgVec call_args = { NULL, 0, 0 };
-
-static void arg_clear() {
-    call_args.len = 0;
+void gc_push_roots(Obj *roots, size_t count) {
+    // TODO
+    printf("pushing %zu root(s) starting at %p\n", count, roots);
 }
 
-Obj call(Obj a) {
-    EXPECT(a, tag_proc);
-    return a.data.p();
+void gc_pop_roots() {
+    printf("popping roots\n");
+    // stub
 }
 
 void finalize() {

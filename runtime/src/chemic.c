@@ -112,18 +112,32 @@ void display(Obj a) {
     }
 }
 
+#define CALL_STACK_MAX_HEIGHT 2048
+
+struct {
+    struct {
+        Obj *roots;
+        size_t count;
+    } frames[CALL_STACK_MAX_HEIGHT];
+    size_t height;
+} gc_stack;
+
 void gc_push_roots(Obj *roots, size_t count) {
-    // TODO
-    printf("pushing %zu root(s) starting at %p\n", count, roots);
+    if (gc_stack.height == CALL_STACK_MAX_HEIGHT) {
+        DIE("stack overflow");
+    }
+    gc_stack.frames[gc_stack.height].roots = roots;
+    gc_stack.frames[gc_stack.height].count = count;
+    gc_stack.height++;
 }
 
 void gc_pop_roots() {
-    // TODO
-    printf("popping roots\n");
+    gc_stack.height--;
 }
 
 void gc_debug() {
-    printf("total allocated: %zu\n", heap.allocated);
+    printf("* total allocated: %zu\n", heap.allocated);
+    printf("* current stack height: %zu\n", gc_stack.height);
 }
 
 void finalize() {

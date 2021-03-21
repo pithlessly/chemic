@@ -92,7 +92,8 @@ inline static char const* classify(Tag t) {
     } else (void) 0
 
 #define NIL (Obj) {tag_nil}
-#define MAKE_NIL(T) T.tag = tag_nil
+#define MAKE_NIL(T) ((T).tag = tag_nil)
+#define IS_NIL(T) ((T).tag == tag_nil)
 
 /* inline */ static void arg_init(size_t n) {
     call_args.len = 0;

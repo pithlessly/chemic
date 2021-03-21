@@ -32,6 +32,7 @@ type expr =
   | Define of var_id * expr
   | Let of { lhs: local_var_id; rhs: expr; body: expr list }
   | Lambda of proc_id
+  | If of { condition: expr; true_case: expr; false_case: expr }
   | Builtin of op * expr list
 
 (* writer data common to both procedures and the top-level *)

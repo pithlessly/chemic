@@ -15,6 +15,7 @@ type expr = Expr.expr =
   | Define of Expr.var_id * expr
   | Let of { lhs: Expr.local_var_id; rhs: expr; body: expr list }
   | Lambda of Expr.proc_id
+  | If of { condition: expr; true_case: expr; false_case: expr }
   | Builtin of op * expr list
 
 let bprintf = Printf.bprintf
@@ -93,6 +94,19 @@ let write_expr ~rctx =
     | Lambda id ->
       let proc = Expr.write_access_proc id in
       fun buf -> bprintf buf "MAKE_PROC(%t,%t);" (Register.write reg) proc
+
+    | If { condition; true_case; false_case } ->
+      let condition = go ~reg condition in
+      let true_case = go ~reg true_case in
+      let false_case = go ~reg false_case in
+      fun buf ->
+        condition buf;
+        (* TODO: this should check for false, not nil,
+         * but we don't support bools yet *)
+        bprintf buf "if(IS_NIL(%t)){%t}else{%t}"
+          (Register.write reg)
+          false_case
+          true_case
 
     | Builtin (Plus, []) -> fun buf ->
       bprintf buf "MAKE_INT(%t,0);" (Register.write reg)

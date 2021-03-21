@@ -30,6 +30,7 @@ type expr =
   | Define of var_id * expr
   | Let of { lhs: local_var_id; rhs: expr; body: expr list }
   | Lambda of proc_id
+  | If of { condition: expr; true_case: expr; false_case: expr }
   | Builtin of op * expr list
 
 module StringMap = Map.Make(String)
@@ -179,6 +180,12 @@ let build_with ~(gctx: global_ctx) =
       let id = gctx.num_procs in
       gctx.num_procs <- id + 1;
       Lambda id
+
+    | List [Ident "if"; cond; true_case; false_case] ->
+      let recurse = go ~lctx ~local_scopes ~block_level:false in
+      If { condition = recurse cond;
+           true_case = recurse true_case;
+           false_case = recurse false_case }
 
     | List (f :: args) ->
       let recurse = go ~lctx ~local_scopes ~block_level:false in

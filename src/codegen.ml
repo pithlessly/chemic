@@ -243,7 +243,7 @@ let write_proc (proc: Expr.proc_writers) =
 let write_main (top_level: Expr.local_writers) =
   let local = write_local top_level in
   fun buf ->
-    Buffer.add_string buf "int main() {\n";
+    Buffer.add_string buf "int main() {\n  initialize();\n";
     local buf;
     Buffer.add_string buf "  finalize();\n  return 0;\n}\n"
 

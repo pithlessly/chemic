@@ -16,7 +16,7 @@ typedef struct {
     uint8_t data[];
 } Str;
 
-struct Cons_s;
+typedef struct Cons_s Cons;
 
 typedef struct Obj_s {
     Tag tag;
@@ -24,14 +24,14 @@ typedef struct Obj_s {
         int64_t i;
         struct Obj_s (*p)();
         Str *s;
-        struct Cons_s *c;
+        Cons *c;
     } data;
 } Obj;
 
-typedef struct Cons_s {
+struct Cons_s {
     Obj car;
     Obj cdr;
-} Cons;
+};
 
 typedef struct {
     Obj *buf;
@@ -141,6 +141,8 @@ extern void display(Obj a);
 extern void gc_push_roots(Obj *roots, size_t count);
 extern void gc_pop_roots();
 extern void gc_debug();
+
+extern void initialize();
 extern void finalize();
 
 #endif /* CHEMIC_H */

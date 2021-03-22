@@ -245,6 +245,9 @@ let write_local { lctx = { var_metadata }; body } =
   let local_decls =
     IntMap.to_seq var_metadata
     |> Seq.map (function
+        (* TODO: this is technically UB; UNSAFE_NEXT_ARG has side effects
+         * and the standard does not guarantee that there is a sequence point
+         * between elements of an array literal *)
         | _, Param_source -> "UNSAFE_NEXT_ARG"
         | _, Define_source
         | _, Let_source -> "NIL")

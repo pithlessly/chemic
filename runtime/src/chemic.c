@@ -1,6 +1,83 @@
 #include "chemic.h"
 
 #include <inttypes.h>
+#include <stdalign.h>
+
+struct {
+    // The half of the heap currently containing live objects
+    unsigned char *alive;
+    // The half of the heap currently used for scratch space
+    unsigned char *dead;
+    // The size of the alive allocation - we don't care about the dead one
+    size_t cap;
+    // How much of the alive allocation is currently in use
+    size_t len;
+} heap = {
+    .alive = NULL,
+    .dead = NULL,
+    .cap = 0,
+    .len = 0,
+};
+
+#define INITIAL_HEAP_SIZE 2048
+
+void initialize() {
+    unsigned char *alive = malloc(INITIAL_HEAP_SIZE);
+    if (alive == NULL) {
+        DIE("out of memory");
+    }
+    heap.alive = alive;
+    heap.dead = NULL;
+    heap.cap = INITIAL_HEAP_SIZE;
+    heap.len = 0;
+}
+
+// NOTE: casting the returned pointer violates strict aliasing. Unfortunately
+// it seems that there's basically no way to write custom allocators without
+// doing so.
+void *heap_alloc(size_t align, size_t len) {
+    // TODO: only check this in debug mode
+    if (align == 0 || (align & (align - 1)) != 0) {
+        DIE("alignment must be power of 2");
+    }
+    size_t alloc_start = (heap.len + (align - 1)) & ~(align - 1);
+    size_t alloc_end = alloc_start + len;
+    if (alloc_end < heap.cap) {
+        heap.len = alloc_end;
+        return heap.alive + alloc_start;
+    } else {
+        return NULL;
+    }
+}
+
+#define CALL_STACK_MAX_HEIGHT 2048
+
+struct {
+    struct {
+        Obj *roots;
+        size_t count;
+    } frames[CALL_STACK_MAX_HEIGHT];
+    size_t height;
+} gc_stack;
+
+void gc_push_roots(Obj *roots, size_t count) {
+    if (gc_stack.height == CALL_STACK_MAX_HEIGHT) {
+        DIE("stack overflow");
+    }
+    gc_stack.frames[gc_stack.height].roots = roots;
+    gc_stack.frames[gc_stack.height].count = count;
+    gc_stack.height++;
+}
+
+void gc_pop_roots() {
+    gc_stack.height--;
+}
+
+void gc_debug() {
+    printf("\n* current stack height: %zu\n", gc_stack.height);
+    printf("* alive heap size: %zu\n", heap.cap);
+    printf("* alive heap used: %zu\n", heap.len);
+}
 
 #define I64_MIN (~9223372036854775807)
 
@@ -59,16 +136,11 @@ Obj len(Obj a) {
     return a;
 }
 
-struct {
-    size_t allocated;
-} heap = { 0 };
-
 Obj cons(Obj a, Obj b) {
-    Cons *c = malloc(sizeof(Cons));
+    Cons *c = heap_alloc(alignof(Cons), sizeof(Cons));
     if (!c) {
         DIE("out of memory");
     }
-    heap.allocated++;
 
     c->car = a;
     c->cdr = b;
@@ -122,34 +194,6 @@ void display(Obj a) {
             putchar(')');
             break;
     }
-}
-
-#define CALL_STACK_MAX_HEIGHT 2048
-
-struct {
-    struct {
-        Obj *roots;
-        size_t count;
-    } frames[CALL_STACK_MAX_HEIGHT];
-    size_t height;
-} gc_stack;
-
-void gc_push_roots(Obj *roots, size_t count) {
-    if (gc_stack.height == CALL_STACK_MAX_HEIGHT) {
-        DIE("stack overflow");
-    }
-    gc_stack.frames[gc_stack.height].roots = roots;
-    gc_stack.frames[gc_stack.height].count = count;
-    gc_stack.height++;
-}
-
-void gc_pop_roots() {
-    gc_stack.height--;
-}
-
-void gc_debug() {
-    printf("* total allocated: %zu\n", heap.allocated);
-    printf("* current stack height: %zu\n", gc_stack.height);
 }
 
 void finalize() {

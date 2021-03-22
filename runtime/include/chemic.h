@@ -132,6 +132,7 @@ extern Obj add(Obj a, Obj b);
 extern Obj sub(Obj a, Obj b);
 extern Obj neg(Obj a);
 extern Obj mul(Obj a, Obj b);
+extern Obj less_than(Obj a, Obj b);
 extern Obj len(Obj a);
 extern Obj cons(Obj a, Obj b);
 extern Obj call(Obj a);

@@ -40,6 +40,18 @@ Obj mul(Obj a, Obj b) {
     return a;
 }
 
+Obj less_than(Obj a, Obj b) {
+    EXPECT(a, tag_int);
+    EXPECT(b, tag_int);
+    // TODO: return true and false rather than 1 and nil
+    if (a.data.i < b.data.i) {
+        MAKE_INT(a, 1);
+    } else {
+        MAKE_NIL(a);
+    }
+    return a;
+}
+
 Obj len(Obj a) {
     EXPECT(a, tag_str);
     size_t len = a.data.s->len;

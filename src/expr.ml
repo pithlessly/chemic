@@ -8,6 +8,7 @@ type op =
   | Plus
   | Minus
   | Times
+  | Lt
   | Len
   | Print
   | Cons
@@ -78,6 +79,7 @@ let get_op = function
   | Ident "+" -> Plus
   | Ident "-" -> Minus
   | Ident "*" -> Times
+  | Ident "<" -> Lt
   | Ident "len" -> Len
   | Ident "display" -> Print
   | Ident "cons" -> Cons

@@ -2,6 +2,7 @@ type op = Expr.op =
   | Plus
   | Minus
   | Times
+  | Lt
   | Len
   | Print
   | Cons
@@ -123,6 +124,11 @@ let write_expr ~rctx =
     | Builtin (Times, lhs :: rhss) ->
       write_fold_fun ~reg ~name:"mul" lhs rhss
 
+    (* TODO: support multiple arguments *)
+    | Builtin (Lt, [a; b]) ->
+      let r_rhs = Register.next rctx reg in
+      binary_fun ~reg ~r_rhs ~name:"less_than" (go ~reg a) b
+
     | Builtin (Len, [x]) ->
       unary_fun ~reg ~name:"len" x
 
@@ -157,6 +163,7 @@ let write_expr ~rctx =
         Buffer.add_string buf "gc_debug();"
 
     | Builtin (Minus, [])
+    | Builtin (Lt, _)
     | Builtin (Len, _)
     | Builtin (Print, _)
     | Builtin (Cons, _)

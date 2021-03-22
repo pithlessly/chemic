@@ -19,6 +19,7 @@ type op =
   | Plus
   | Minus
   | Times
+  | Lt
   | Len
   | Print
   | Cons

@@ -14,6 +14,7 @@ type op =
   | Cons
   | Call
   | Debug
+  | GcCollect
 
 type global_var_id = int
 type local_var_id = int
@@ -85,6 +86,7 @@ let get_op = function
   | Ident "cons" -> Cons
   | Ident "call" -> Call
   | Ident "dbg" -> Debug
+  | Ident "gc" -> GcCollect
   | Ident s ->
     raise (Invalid_argument (Printf.sprintf "invalid operator: \"%s\""
                                (String.escaped s)))

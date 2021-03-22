@@ -79,6 +79,10 @@ void gc_debug() {
     printf("* alive heap used: %zu\n", heap.len);
 }
 
+void gc_collect() {
+    printf("* TODO: garbage collect here!\n");
+}
+
 #define I64_MIN (~9223372036854775807)
 
 Obj add(Obj a, Obj b) {

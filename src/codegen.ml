@@ -8,6 +8,7 @@ type op = Expr.op =
   | Cons
   | Call
   | Debug
+  | GcCollect
 
 type expr = Expr.expr =
   | Int of int64
@@ -162,13 +163,18 @@ let write_expr ~rctx =
         expr buf;
         Buffer.add_string buf "gc_debug();"
 
+    | Builtin (GcCollect, []) ->
+      fun buf -> bprintf buf "MAKE_NIL(%t);gc_collect();"
+          (Register.write reg)
+
     | Builtin (Minus, [])
     | Builtin (Lt, _)
     | Builtin (Len, _)
     | Builtin (Print, _)
     | Builtin (Cons, _)
     | Builtin (Call, _)
-    | Builtin (Debug, _) ->
+    | Builtin (Debug, _)
+    | Builtin (GcCollect, _) ->
       raise (Invalid_argument "invalid expression")
 
   (* Helper function to construct a writer which emits code to evaluate a function's

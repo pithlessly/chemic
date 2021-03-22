@@ -141,6 +141,7 @@ extern void display(Obj a);
 extern void gc_push_roots(Obj *roots, size_t count);
 extern void gc_pop_roots();
 extern void gc_debug();
+extern void gc_collect();
 
 extern void initialize();
 extern void finalize();

@@ -25,6 +25,7 @@ type op =
   | Cons
   | Call
   | Debug
+  | GcCollect
 
 type expr =
   | Int of int64

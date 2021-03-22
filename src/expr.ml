@@ -94,10 +94,16 @@ let get_op = function
     raise (Invalid_argument "non-identifier in function position")
 
 let find_defined_vars forms =
+  let present = ref StringMap.empty in
   List.to_seq forms
   |> Seq.filter_map
     (function
-      | List [Ident "define"; Ident i; _] -> Some i
+      | List [Ident "define"; Ident i; _] ->
+        (match StringMap.find_opt i !present with
+         | Some _ -> None
+         | None ->
+           present := StringMap.add i () !present;
+           Some i)
       | _ -> None)
 
 let build_with ~(gctx: global_ctx) =

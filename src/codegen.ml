@@ -224,15 +224,13 @@ let write_local (local: Expr.local_writers) =
   let aux_size = local.num_decls + num_regs in
 
   fun buf ->
-    bprintf buf "  Obj r[%d]={%t};\n"
-      aux_size
-      (Utils.seq_replicate num_regs "NIL"
-       |> Seq.append local.local_decls (* NB - these are prepended, not appended *)
-       |> Seq.map (fun s buf -> Buffer.add_string buf s)
-       |> Writer.join ',');
-    bprintf buf "  gc_push_roots(r,%d);\n" aux_size;
-    bprintf buf "  const size_t REG=%d;\n"
-      local.num_decls;
+    bprintf buf "  Obj r[%d];" aux_size;
+    Utils.seq_iteri (bprintf buf "r[%d]=%s;") local.local_decls;
+    bprintf buf "\n  const size_t REG=%d;" local.num_decls;
+    for i = 0 to num_regs - 1 do
+      bprintf buf "r[REG+%d]=NIL;" i
+    done;
+    bprintf buf "\n  gc_push_roots(r,%d);\n" aux_size;
     List.iter (bprintf buf "  %t\n") body;
     Buffer.add_string buf "  gc_pop_roots();\n"
 

@@ -53,7 +53,7 @@ end = struct
 end
 
 let write_access_var = function
-  | Expr.Global id -> fun buf -> bprintf buf "GLO%d" id
+  | Expr.Global id -> fun buf -> bprintf buf "g[%d]" id
   | Expr.Local id -> fun buf -> bprintf buf "r[%d]" id
 
 (* Return a Writer.t that emits a sequence of statements which have the
@@ -247,9 +247,14 @@ let write_proc (proc: Expr.proc_writers) =
 let write_main (top_level: Expr.local_writers) =
   let local = write_local top_level in
   fun buf ->
-    Buffer.add_string buf "int main() {\n  initialize();\n";
+    Buffer.add_string buf "int main() {\n";
+    Buffer.add_string buf "  initialize();\n";
+    Buffer.add_string buf "  gc_push_roots(g,NUM_GLOBALS);\n";
     local buf;
-    Buffer.add_string buf "  finalize();\n  return 0;\n}\n"
+    Buffer.add_string buf "  gc_pop_roots();\n";
+    Buffer.add_string buf "  finalize();\n";
+    Buffer.add_string buf "  return 0;\n";
+    Buffer.add_string buf "}\n"
 
 (* Convert a syntax tree into a C program that evaluates each
  * top-level expression. *)

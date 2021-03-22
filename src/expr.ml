@@ -304,13 +304,24 @@ let build forms =
       Writer.empty
     else
       let decls =
-        Utils.seq_init num_globals (fun i buf -> bprintf buf "GLO%d=NIL" i)
+        Utils.seq_replicate num_globals
+          (fun buf -> Buffer.add_string buf "NIL")
         |> Writer.join ','
       in
-      fun buf -> bprintf buf "static Obj %t;\n" decls
+      fun buf -> bprintf buf "static Obj g[%d]={%t};\n" num_globals decls
   in
 
-  { decls = (fun buf -> write_string_decls buf; write_global_decls buf);
+  (* declaration of a const representing the number of global variables *)
+  let write_num_global_decl =
+    fun buf ->
+      bprintf buf "static const size_t NUM_GLOBALS=%d;\n" num_globals
+  in
+
+  { decls =
+      (fun buf ->
+         write_string_decls buf;
+         write_global_decls buf;
+         write_num_global_decl buf);
 
     procs =
       List.rev gctx.procs

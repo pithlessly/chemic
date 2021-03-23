@@ -26,8 +26,12 @@ void initialize() {
     if (alive == NULL) {
         DIE("out of memory");
     }
+    unsigned char *dead = malloc(INITIAL_HEAP_SIZE);
+    if (dead == NULL) {
+        DIE("out of memory");
+    }
     heap.alive = alive;
-    heap.dead = NULL;
+    heap.dead = dead;
     heap.cap = INITIAL_HEAP_SIZE;
     heap.len = 0;
 }
@@ -52,11 +56,13 @@ void *heap_alloc(size_t align, size_t len) {
 
 #define CALL_STACK_MAX_HEIGHT 2048
 
+typedef struct {
+    Obj *roots;
+    size_t count;
+} GcStackFrame;
+
 struct {
-    struct {
-        Obj *roots;
-        size_t count;
-    } frames[CALL_STACK_MAX_HEIGHT];
+    GcStackFrame frames[CALL_STACK_MAX_HEIGHT];
     size_t height;
 } gc_stack;
 
@@ -79,8 +85,46 @@ void gc_debug() {
     printf("* alive heap used: %zu\n", heap.len);
 }
 
+size_t gc_mark_and_copy(Obj *o) {
+    switch (o->tag) {
+        case tag_nil:
+        case tag_int:
+        case tag_proc:
+        case tag_str:
+            break;
+        case tag_cons:
+            {
+                Cons *c = o->data.c;
+                if (c->gc_tag == NULL) {
+                    gc_mark_and_copy(&c->car);
+                    gc_mark_and_copy(&c->cdr);
+                    // should not be nil, since the heap is large enough
+                    Cons *new = heap_alloc(alignof(Cons), sizeof(Cons));
+                    *new = *c;
+                    c->gc_tag = new;
+                }
+                o->data.c = c->gc_tag;
+            }
+            break;
+    }
+}
+
 void gc_collect() {
-    printf("* TODO: garbage collect here!\n");
+    // swap the alive and dead heap pointers
+    {
+        unsigned char *tmp = heap.alive;
+        heap.alive = heap.dead;
+        heap.dead = tmp;
+    }
+    // empty the new heap, because objects are about to be copied to it
+    heap.len = 0;
+    // mark and copy all objects in the GC stack
+    for (size_t i = 0; i < gc_stack.height; i++) {
+        GcStackFrame frame = gc_stack.frames[i];
+        for (size_t j = 0; j < frame.count; j++) {
+            gc_mark_and_copy(&frame.roots[j]);
+        }
+    }
 }
 
 #define I64_MIN (~9223372036854775807)
@@ -146,6 +190,7 @@ Obj cons(Obj a, Obj b) {
         DIE("out of memory");
     }
 
+    c->gc_tag = NULL;
     c->car = a;
     c->cdr = b;
     a.tag = tag_cons;

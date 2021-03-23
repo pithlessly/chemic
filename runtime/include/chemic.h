@@ -29,6 +29,7 @@ typedef struct Obj_s {
 } Obj;
 
 struct Cons_s {
+    Cons *gc_tag;
     Obj car;
     Obj cdr;
 };

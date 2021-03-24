@@ -22,6 +22,7 @@ type expr =
   | Lambda of proc_id
   | If of { condition: expr; true_case: expr; false_case: expr }
   | Builtin of string * expr list
+  | Operator of string
 
 module StringMap = Map.Make(String)
 module IntMap = Map.Make(Int)
@@ -167,6 +168,9 @@ let build_with ~(gctx: global_ctx) =
       If { condition = recurse cond;
            true_case = recurse true_case;
            false_case = recurse false_case }
+
+    | List [Ident "operator"; Ident s] ->
+      Operator s
 
     | List (Ident f :: args) ->
       let recurse = go ~lctx ~local_scopes ~block_level:false in

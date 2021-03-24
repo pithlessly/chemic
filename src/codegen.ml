@@ -7,6 +7,7 @@ type expr = Expr.expr =
   | Lambda of Expr.proc_id
   | If of { condition: expr; true_case: expr; false_case: expr }
   | Builtin of string * expr list
+  | Operator of string
 
 let bprintf = Printf.bprintf
 
@@ -101,38 +102,47 @@ let write_expr ~rctx =
     | Builtin (fn, arg_exprs) ->
       let fmt s = Printf.sprintf s (String.escaped fn) in
       (* get information associated with the operator *)
-      match Operator.lookup fn with
-      | None ->
-        raise (Invalid_argument (fmt "invalid operator: \"%s\""))
-      | Some { args; impl } ->
-        (* check that the right number of arguments are being passed *)
-        let num_args = List.length arg_exprs in
-        (match args with
-         | Operator.Exactly n when num_args <> n ->
-           raise (Invalid_argument (fmt "operator \"%s\" takes %d arguments" n))
-         | Operator.AtLeast n when num_args < n ->
-           raise (Invalid_argument (fmt "operator \"%s\" takes >= %d arguments" n))
-         | _ -> ());
+      (match Operator.lookup fn with
+       | None ->
+         raise (Invalid_argument (fmt "invalid operator: \"%s\""))
+       | Some { args; impl; _ } ->
+         (* check that the right number of arguments are being passed *)
+         let num_args = List.length arg_exprs in
+         (match args with
+          | Operator.Exactly n when num_args <> n ->
+            raise (Invalid_argument (fmt "operator \"%s\" takes %d arguments" n))
+          | Operator.AtLeast n when num_args < n ->
+            raise (Invalid_argument (fmt "operator \"%s\" takes >= %d arguments" n))
+          | _ -> ());
 
-        (* construct a list of writers for the arguments and for
-         * the registers into which the expressions are stored *)
+         (* construct a list of writers for the arguments and for
+          * the registers into which the expressions are stored *)
 
-        let ((args_writers: Writer.t list),
-             (args_reg_writers: Writer.t list)) =
+         let ((args_writers: Writer.t list),
+              (args_reg_writers: Writer.t list)) =
 
-          let current_reg = ref (Lazy.from_val reg) in
-          arg_exprs |> Utils.unzip_with (fun expr ->
-              let reg = Lazy.force !current_reg in
-              (* only compute this on the next iteration to avoid
-               * allocating one more register than we need *)
-              current_reg := lazy (Register.next rctx reg);
-              (go ~reg expr, Register.write reg)
-            )
-        in
-        let impl_writer = impl ~args:args_reg_writers ~out:(Register.write reg) in
-        fun buf ->
-          List.iter (fun w -> w buf) args_writers;
-          impl_writer buf
+           let current_reg = ref (Lazy.from_val reg) in
+           arg_exprs |> Utils.unzip_with (fun expr ->
+               let reg = Lazy.force !current_reg in
+               (* only compute this on the next iteration to avoid
+                * allocating one more register than we need *)
+               current_reg := lazy (Register.next rctx reg);
+               (go ~reg expr, Register.write reg)
+             )
+         in
+         let impl_writer = impl ~args:args_reg_writers ~out:(Register.write reg) in
+         fun buf ->
+           List.iter (fun w -> w buf) args_writers;
+           impl_writer buf)
+
+      | Operator fn ->
+        (match Operator.lookup fn with
+         | None ->
+           raise (Invalid_argument (Printf.sprintf "invalid operator: \"%s\""
+                                      (String.escaped fn)))
+         | Some { proc_ident; _ } ->
+           fun buf ->
+             bprintf buf "MAKE_PROC(%t,&operator_%s);" (Register.write reg) proc_ident)
 
   in fun expr -> go ~reg:(Register.zero rctx) expr
 
@@ -159,7 +169,7 @@ let write_local (local: Expr.local_writers) =
 let write_proc (proc: Expr.proc_writers) =
   let local = write_local proc.local in
   fun buf ->
-    bprintf buf "Obj %t() {\n" proc.name;
+    bprintf buf "static Obj %t() {\n" proc.name;
     bprintf buf "  UNSAFE_EXPECT_ARGS(%d);\n" proc.num_params;
     local buf;
     bprintf buf "  return r[REG];\n}\n"
@@ -184,6 +194,7 @@ let gen_code (expr_data: Expr.global_writers) =
 
   let buf = Buffer.create 2048 in
   Buffer.add_string buf "#include \"chemic.h\"\n";
+  Buffer.add_string buf "#include \"operators.h\"\n";
   expr_data.decls buf;
   expr_data.procs |> List.iter (fun proc -> write_proc proc buf);
   main buf;

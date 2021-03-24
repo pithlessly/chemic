@@ -15,18 +15,6 @@ type string_id
 (* a token identifying a procedure literal *)
 type proc_id
 
-type op =
-  | Plus
-  | Minus
-  | Times
-  | Lt
-  | Len
-  | Print
-  | Cons
-  | Call
-  | Debug
-  | GcCollect
-
 type expr =
   | Int of int64
   | String of string_id
@@ -35,7 +23,7 @@ type expr =
   | Let of { lhs: local_var_id; rhs: expr; body: expr list }
   | Lambda of proc_id
   | If of { condition: expr; true_case: expr; false_case: expr }
-  | Builtin of op * expr list
+  | Builtin of string * expr list
 
 (* writer data common to both procedures and the top-level *)
 type local_writers = {

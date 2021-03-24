@@ -1,9 +1,18 @@
 let unfold f init =
-  let rec go acc xs =
+  let rec loop acc xs =
     match f acc with
-    | Some x, acc -> go acc (x :: xs)
+    | Some x, acc -> loop acc (x :: xs)
     | None, acc -> (List.rev xs, acc)
-  in go init []
+  in loop init []
+
+let unzip_with f =
+  let rec loop lef rig =
+    function
+    | [] -> (List.rev lef, List.rev rig)
+    | x :: xs ->
+      let (l, r) = f x in
+      loop (l :: lef) (r :: rig) xs
+  in loop [] []
 
 let seq_init (n: int) (f: int -> 'a): 'a Seq.t =
   let rec loop idx () =

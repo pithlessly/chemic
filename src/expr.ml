@@ -4,18 +4,6 @@ type form = Parse.form =
   | Ident of string
   | List of form list
 
-type op =
-  | Plus
-  | Minus
-  | Times
-  | Lt
-  | Len
-  | Print
-  | Cons
-  | Call
-  | Debug
-  | GcCollect
-
 type global_var_id = int
 type local_var_id = int
 type var_id =
@@ -33,7 +21,7 @@ type expr =
   | Let of { lhs: local_var_id; rhs: expr; body: expr list }
   | Lambda of proc_id
   | If of { condition: expr; true_case: expr; false_case: expr }
-  | Builtin of op * expr list
+  | Builtin of string * expr list
 
 module StringMap = Map.Make(String)
 module IntMap = Map.Make(Int)
@@ -75,23 +63,6 @@ type global_ctx = {
 
   mutable globals: global_var_id StringMap.t;
 }
-
-let get_op = function
-  | Ident "+" -> Plus
-  | Ident "-" -> Minus
-  | Ident "*" -> Times
-  | Ident "<" -> Lt
-  | Ident "len" -> Len
-  | Ident "display" -> Print
-  | Ident "cons" -> Cons
-  | Ident "call" -> Call
-  | Ident "dbg" -> Debug
-  | Ident "gc-collect" -> GcCollect
-  | Ident s ->
-    raise (Invalid_argument (Printf.sprintf "invalid operator: \"%s\""
-                               (String.escaped s)))
-  | _ ->
-    raise (Invalid_argument "non-identifier in function position")
 
 let find_defined_vars forms =
   let present = ref StringMap.empty in
@@ -197,9 +168,12 @@ let build_with ~(gctx: global_ctx) =
            true_case = recurse true_case;
            false_case = recurse false_case }
 
-    | List (f :: args) ->
+    | List (Ident f :: args) ->
       let recurse = go ~lctx ~local_scopes ~block_level:false in
-      Builtin (get_op f, List.map recurse args)
+      Builtin (f, List.map recurse args)
+
+    | List (_ :: _) ->
+      raise (Invalid_argument "non-identifier in function position")
 
     | List [] ->
       raise (Invalid_argument "nil cannot be evaluated")
@@ -306,15 +280,12 @@ let build forms =
 
   (* declarations of global static objects to hold global variables *)
   let write_global_decls =
-    if num_globals = 0 then
-      Writer.empty
-    else
-      let decls =
-        Utils.seq_replicate num_globals
-          (fun buf -> Buffer.add_string buf "NIL")
-        |> Writer.join ','
-      in
-      fun buf -> bprintf buf "static Obj g[%d]={%t};\n" num_globals decls
+    let decls =
+      Utils.seq_replicate num_globals
+        (fun buf -> Buffer.add_string buf "NIL")
+      |> Writer.join ','
+    in
+    fun buf -> bprintf buf "static Obj g[%d]={%t};\n" num_globals decls
   in
 
   (* declaration of a const representing the number of global variables *)

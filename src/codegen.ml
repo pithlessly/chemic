@@ -1,15 +1,3 @@
-type op = Expr.op =
-  | Plus
-  | Minus
-  | Times
-  | Lt
-  | Len
-  | Print
-  | Cons
-  | Call
-  | Debug
-  | GcCollect
-
 type expr = Expr.expr =
   | Int of int64
   | String of Expr.string_id
@@ -18,7 +6,7 @@ type expr = Expr.expr =
   | Let of { lhs: Expr.local_var_id; rhs: expr; body: expr list }
   | Lambda of Expr.proc_id
   | If of { condition: expr; true_case: expr; false_case: expr }
-  | Builtin of op * expr list
+  | Builtin of string * expr list
 
 let bprintf = Printf.bprintf
 
@@ -110,108 +98,41 @@ let write_expr ~rctx =
           false_case
           true_case
 
-    | Builtin (Plus, []) -> fun buf ->
-      bprintf buf "MAKE_INT(%t,0);" (Register.write reg)
-    | Builtin (Plus, lhs :: rhss) ->
-      write_fold_fun ~reg ~name:"add" lhs rhss
+    | Builtin (fn, arg_exprs) ->
+      let fmt s = Printf.sprintf s (String.escaped fn) in
+      (* get information associated with the operator *)
+      match Operator.lookup fn with
+      | None ->
+        raise (Invalid_argument (fmt "invalid operator: \"%s\""))
+      | Some { args; impl } ->
+        (* check that the right number of arguments are being passed *)
+        let num_args = List.length arg_exprs in
+        (match args with
+         | Operator.Exactly n when num_args <> n ->
+           raise (Invalid_argument (fmt "operator \"%s\" takes %d arguments" n))
+         | Operator.AtLeast n when num_args < n ->
+           raise (Invalid_argument (fmt "operator \"%s\" takes >= %d arguments" n))
+         | _ -> ());
 
-    | Builtin (Minus, [x]) ->
-      unary_fun ~reg ~name:"neg" x
-    | Builtin (Minus, lhs :: rhss) ->
-      write_fold_fun ~reg ~name:"sub" lhs rhss
+        (* construct a list of writers for the arguments and for
+         * the registers into which the expressions are stored *)
 
-    | Builtin (Times, []) -> fun buf ->
-      bprintf buf "MAKE_INT(%t,1);" (Register.write reg)
-    | Builtin (Times, lhs :: rhss) ->
-      write_fold_fun ~reg ~name:"mul" lhs rhss
+        let ((args_writers: Writer.t list),
+             (args_reg_writers: Writer.t list)) =
 
-    (* TODO: support multiple arguments *)
-    | Builtin (Lt, [a; b]) ->
-      let r_rhs = Register.next rctx reg in
-      binary_fun ~reg ~r_rhs ~name:"less_than" (go ~reg a) b
-
-    | Builtin (Len, [x]) ->
-      unary_fun ~reg ~name:"len" x
-
-    | Builtin (Print, [x]) ->
-      let expr = go ~reg x in
-      fun buf -> bprintf buf "%tdisplay(%t);" expr (Register.write reg)
-
-    | Builtin (Cons, [a; b]) ->
-      let r_rhs = Register.next rctx reg in
-      binary_fun ~reg ~r_rhs ~name:"cons" (go ~reg a) b
-
-    | Builtin (Call, f :: args) ->
-      let write_fn = go ~reg f in
-      let n_args = List.length args in
-      let expr_reg = Register.next rctx reg in
-      let args = List.map (go ~reg:expr_reg) args in
-      fun buf ->
-        write_fn buf;
-        bprintf buf "arg_init(%d);" n_args;
-        args |> List.iter (fun write_compute_arg ->
-            write_compute_arg buf;
-            bprintf buf "arg_push(%t);" (Register.write expr_reg)
-          );
-        bprintf buf "%t=call(%t);"
-          (Register.write reg)
-          (Register.write reg)
-
-    | Builtin (Debug, [x]) ->
-      let expr = go ~reg x in
-      fun buf ->
-        expr buf;
-        Buffer.add_string buf "gc_debug();"
-
-    | Builtin (GcCollect, []) ->
-      fun buf -> bprintf buf "MAKE_NIL(%t);gc_collect();"
-          (Register.write reg)
-
-    | Builtin (Minus, [])
-    | Builtin (Lt, _)
-    | Builtin (Len, _)
-    | Builtin (Print, _)
-    | Builtin (Cons, _)
-    | Builtin (Call, _)
-    | Builtin (Debug, _)
-    | Builtin (GcCollect, _) ->
-      raise (Invalid_argument "invalid expression")
-
-  (* Helper function to construct a writer which emits code to evaluate a function's
-   * argument and then call it, assigning its result to the given register. *)
-  and unary_fun ~reg ~name expr =
-    let expr = go ~reg expr in
-    fun buf ->
-      bprintf buf "%t%t=%s(%t);"
-        expr
-        (Register.write reg)
-        name
-        (Register.write reg)
-
-  (* Helper function which takes a writer emitting code to evaluate a function's first
-   * argument to 'reg', then an expression to evaluate and store to 'r_rhs', and returns a
-   * writer emiting code that evaluates a two-argument function and stores the result
-   * to 'reg. *)
-  and binary_fun ~reg ~r_rhs ~name lhs expr_rhs =
-    let rhs = go ~reg:r_rhs expr_rhs in
-    fun buf ->
-      bprintf buf "%t%t%t=%s(%t,%t);"
-        lhs
-        rhs
-        (Register.write reg)
-        name
-        (Register.write reg)
-        (Register.write r_rhs)
-
-  (* Helper function to construct a writer which emits code to evaluate a sequence
-   * of arguments and combine them with repeated calls to a 2-argument function,
-   * assigning the final result to the given register. *)
-  and write_fold_fun ~reg ~name lhs rhss =
-    let r_rhs = Register.next rctx reg in
-    List.fold_left
-      (fun lhs rhs -> binary_fun ~reg ~r_rhs ~name lhs rhs)
-      (go ~reg lhs)
-      rhss
+          let current_reg = ref (Lazy.from_val reg) in
+          arg_exprs |> Utils.unzip_with (fun expr ->
+              let reg = Lazy.force !current_reg in
+              (* only compute this on the next iteration to avoid
+               * allocating one more register than we need *)
+              current_reg := lazy (Register.next rctx reg);
+              (go ~reg expr, Register.write reg)
+            )
+        in
+        let impl_writer = impl ~args:args_reg_writers ~out:(Register.write reg) in
+        fun buf ->
+          List.iter (fun w -> w buf) args_writers;
+          impl_writer buf
 
   in fun expr -> go ~reg:(Register.zero rctx) expr
 

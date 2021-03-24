@@ -7,7 +7,8 @@ type expr = Expr.expr =
   | Let of { lhs: Expr.local_var_id; rhs: expr; body: expr list }
   | Lambda of Expr.proc_id
   | If of { condition: expr; true_case: expr; false_case: expr }
-  | Builtin of string * expr list
+  | Call of expr * expr list
+  | Operator of Operator.t * expr list
 
 let bprintf = Printf.bprintf
 
@@ -60,6 +61,12 @@ let write_expr ~rctx =
     | Var id ->
       fun buf -> bprintf buf "%t=%t;" (Register.write reg) (write_access_var id)
 
+    | OperatorArg op ->
+      fun buf ->
+        bprintf buf "MAKE_PROC(%t,&operator_%s);"
+          (Register.write reg)
+          op.proc_ident
+
     | Define (id, x) ->
       let expr = go ~reg x in
       let var = write_access_var id in
@@ -99,47 +106,58 @@ let write_expr ~rctx =
           false_case
           true_case
 
-    | Builtin (fn, arg_exprs) ->
-      let fmt s = Printf.sprintf s (String.escaped fn) in
-      (* get information associated with the operator *)
-      (match Operator.lookup fn with
-       | None ->
-         raise (Invalid_argument (fmt "invalid operator: \"%s\""))
-       | Some { args; impl; _ } ->
-         (* check that the right number of arguments are being passed *)
-         let num_args = List.length arg_exprs in
-         (match args with
-          | Operator.Exactly n when num_args <> n ->
-            raise (Invalid_argument (fmt "operator \"%s\" takes %d arguments" n))
-          | Operator.AtLeast n when num_args < n ->
-            raise (Invalid_argument (fmt "operator \"%s\" takes >= %d arguments" n))
-          | _ -> ());
+    | Call (fn, args) ->
+      (* construct writers for the function and its arguments, as well as
+       * the registers into which they are stored *)
 
-         (* construct a list of writers for the arguments and for
-          * the registers into which the expressions are stored *)
+      let fn_writer = go ~reg fn in
+      let ((args_writers: Writer.t list),
+           (args_reg_writers: Writer.t list)) =
 
-         let ((args_writers: Writer.t list),
-              (args_reg_writers: Writer.t list)) =
+        let current_reg = ref reg in
+        args |> Utils.unzip_with (fun expr ->
+            let reg = Register.next rctx !current_reg in
+            current_reg := reg;
+            (go ~reg expr, Register.write reg)
+          )
+      in
 
-           let current_reg = ref (Lazy.from_val reg) in
-           arg_exprs |> Utils.unzip_with (fun expr ->
-               let reg = Lazy.force !current_reg in
-               (* only compute this on the next iteration to avoid
-                * allocating one more register than we need *)
-               current_reg := lazy (Register.next rctx reg);
-               (go ~reg expr, Register.write reg)
-             )
-         in
-         let impl_writer = impl ~args:args_reg_writers ~out:(Register.write reg) in
-         fun buf ->
-           List.iter (fun w -> w buf) args_writers;
-           impl_writer buf)
+      fun buf ->
+        fn_writer buf;
+        List.iter (fun w -> w buf) args_writers;
+        bprintf buf "arg_init(%d);" (List.length args);
+        List.iter (bprintf buf "arg_push(%t);") args_reg_writers;
+        bprintf buf "%t=call(%t);" (Register.write reg) (Register.write reg)
 
-      | OperatorArg op ->
-        fun buf ->
-          bprintf buf "MAKE_PROC(%t,&operator_%s);"
-            (Register.write reg)
-            op.proc_ident
+    | Operator (op, args) ->
+      (* check that the right number of arguments are being passed *)
+      let num_args = List.length args in
+      (match op.args with
+       | Operator.Exactly n when num_args <> n ->
+         raise (Invalid_argument (Printf.sprintf "operator takes %d arguments" n))
+       | Operator.AtLeast n when num_args < n ->
+         raise (Invalid_argument (Printf.sprintf "operator takes >= %d arguments" n))
+       | _ -> ());
+
+      (* construct a list of writers for the arguments and for
+       * the registers into which the expressions are stored *)
+
+      let ((args_writers: Writer.t list),
+           (args_reg_writers: Writer.t list)) =
+
+        let current_reg = ref (Lazy.from_val reg) in
+        args |> Utils.unzip_with (fun expr ->
+            let reg = Lazy.force !current_reg in
+            (* only compute this on the next iteration to avoid
+             * allocating one more register than we need *)
+            current_reg := lazy (Register.next rctx reg);
+            (go ~reg expr, Register.write reg)
+          )
+      in
+      let impl_writer = op.impl ~args:args_reg_writers ~out:(Register.write reg) in
+      fun buf ->
+        List.iter (fun w -> w buf) args_writers;
+        impl_writer buf
 
   in fun expr -> go ~reg:(Register.zero rctx) expr
 

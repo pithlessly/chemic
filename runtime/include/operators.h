@@ -65,16 +65,6 @@ static Obj operator_cons() {
     return cons(call_args.buf[0], call_args.buf[1]);
 }
 
-static Obj operator_call() {
-    size_t len = expect_args_min(1);
-    Obj fn = call_args.buf[0];
-    call_args.len = len - 1;
-    for (size_t i = 1; i < len; i++) {
-        call_args.buf[i - 1] = call_args.buf[i];
-    }
-    return call(fn);
-}
-
 static Obj operator_dbg() {
     expect_args_exact(0);
     gc_debug();

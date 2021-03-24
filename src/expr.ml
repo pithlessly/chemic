@@ -22,7 +22,8 @@ type expr =
   | Let of { lhs: local_var_id; rhs: expr; body: expr list }
   | Lambda of proc_id
   | If of { condition: expr; true_case: expr; false_case: expr }
-  | Builtin of string * expr list
+  | Call of expr * expr list
+  | Operator of Operator.t * expr list
 
 module StringMap = Map.Make(String)
 module IntMap = Map.Make(Int)
@@ -169,12 +170,18 @@ let build_with ~(gctx: global_ctx) =
            true_case = recurse true_case;
            false_case = recurse false_case }
 
-    | List (Ident f :: args) ->
-      let recurse = go ~lctx ~local_scopes ~block_level:false in
-      Builtin (f, List.map recurse args)
+    | List (f :: args) ->
+      let op =
+        match f with
+        | Ident i -> Operator.lookup i
+        | _ -> None
+      in
 
-    | List (_ :: _) ->
-      raise (Invalid_argument "non-identifier in function position")
+      let recurse = go ~lctx ~local_scopes ~block_level:false in
+
+      (match op with
+       | None -> Call (recurse f, List.map recurse args)
+       | Some op -> Operator (op, List.map recurse args))
 
     | List [] ->
       raise (Invalid_argument "nil cannot be evaluated")

@@ -87,17 +87,6 @@ let all_ops =
     (make_binary ~proc_ident:"cons"
        (fun out a b buf -> bprintf buf "%t=cons(%t,%t);" out a b))
 
-  |> StringMap.add "call"
-    { args = AtLeast 1;
-      proc_ident = "call";
-      impl = fun ~args ~out buf ->
-        match args with
-        | [] -> impossible ()
-        | f :: args ->
-          bprintf buf "arg_init(%d);" (List.length args);
-          args |> List.iter (bprintf buf "arg_push(%t);");
-          bprintf buf "%t=call(%t);" out f }
-
   |> StringMap.add "dbg"
     (make_nullary_nil ~proc_ident:"dbg" "gc_debug();")
 

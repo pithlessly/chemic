@@ -24,7 +24,8 @@ type expr =
   | Let of { lhs: local_var_id; rhs: expr; body: expr list }
   | Lambda of proc_id
   | If of { condition: expr; true_case: expr; false_case: expr }
-  | Builtin of string * expr list
+  | Call of expr * expr list
+  | Operator of Operator.t * expr list
 
 (* writer data common to both procedures and the top-level *)
 type local_writers = {

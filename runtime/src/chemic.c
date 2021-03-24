@@ -88,6 +88,8 @@ void gc_debug() {
 size_t gc_mark_and_copy(Obj *o) {
     switch (o->tag) {
         case tag_nil:
+        case tag_true:
+        case tag_false:
         case tag_int:
         case tag_proc:
         case tag_str:
@@ -168,13 +170,7 @@ Obj mul(Obj a, Obj b) {
 Obj less_than(Obj a, Obj b) {
     EXPECT(a, tag_int);
     EXPECT(b, tag_int);
-    // TODO: return true and false rather than 1 and nil
-    if (a.data.i < b.data.i) {
-        MAKE_INT(a, 1);
-    } else {
-        MAKE_NIL(a);
-    }
-    return a;
+    return a.data.i < b.data.i ? TRUE : FALSE;
 }
 
 Obj len(Obj a) {
@@ -231,6 +227,12 @@ void display(Obj a) {
     switch (a.tag) {
         case tag_nil:
             fputs("()", stdout);
+            break;
+        case tag_true:
+            fputs("#t", stdout);
+            break;
+        case tag_false:
+            fputs("#f", stdout);
             break;
         case tag_int:
             printf("%" PRId64, a.data.i);

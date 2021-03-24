@@ -9,7 +9,15 @@
 
 /*= type definitions =*/
 
-typedef enum { tag_nil, tag_int, tag_proc, tag_str, tag_cons } Tag;
+typedef enum {
+    tag_nil,
+    tag_true,
+    tag_false,
+    tag_int,
+    tag_proc,
+    tag_str,
+    tag_cons
+} Tag;
 
 typedef struct {
     size_t len;
@@ -49,6 +57,8 @@ extern ArgVec call_args;
 inline static char const* classify(Tag t) {
     switch (t) {
         case tag_nil: return "nil";
+        case tag_true:
+        case tag_false: return "boolean";
         case tag_int: return "int";
         case tag_proc: return "procedure";
         case tag_str: return "string";
@@ -92,9 +102,13 @@ inline static char const* classify(Tag t) {
         T.data.p = P; \
     } else (void) 0
 
-#define NIL (Obj) {tag_nil}
 #define MAKE_NIL(T) ((T).tag = tag_nil)
 #define IS_NIL(T) ((T).tag == tag_nil)
+#define IS_TRUTHY(T) ((T).tag != tag_false)
+
+#define NIL (Obj) {tag_nil}
+#define TRUE (Obj) {tag_true}
+#define FALSE (Obj) {tag_false}
 
 /* inline */ static void arg_init(size_t n) {
     call_args.len = 0;

@@ -99,12 +99,10 @@ let write_expr ~rctx =
       let false_case = go ~reg false_case in
       fun buf ->
         condition buf;
-        (* TODO: this should check for false, not nil,
-         * but we don't support bools yet *)
-        bprintf buf "if(IS_NIL(%t)){%t}else{%t}"
+        bprintf buf "if(IS_TRUTHY(%t)){%t}else{%t}"
           (Register.write reg)
-          false_case
           true_case
+          false_case
 
     | Call (fn, args) ->
       (* construct writers for the function and its arguments, as well as

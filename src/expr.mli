@@ -19,12 +19,12 @@ type expr =
   | Int of int64
   | String of string_id
   | Var of var_id
+  | OperatorArg of Operator.t
   | Define of var_id * expr
   | Let of { lhs: local_var_id; rhs: expr; body: expr list }
   | Lambda of proc_id
   | If of { condition: expr; true_case: expr; false_case: expr }
   | Builtin of string * expr list
-  | Operator of string
 
 (* writer data common to both procedures and the top-level *)
 type local_writers = {

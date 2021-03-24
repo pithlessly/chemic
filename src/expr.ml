@@ -17,12 +17,12 @@ type expr =
   | Int of int64
   | String of string_id
   | Var of var_id
+  | OperatorArg of Operator.t
   | Define of var_id * expr
   | Let of { lhs: local_var_id; rhs: expr; body: expr list }
   | Lambda of proc_id
   | If of { condition: expr; true_case: expr; false_case: expr }
   | Builtin of string * expr list
-  | Operator of string
 
 module StringMap = Map.Make(String)
 module IntMap = Map.Make(Int)
@@ -169,9 +169,6 @@ let build_with ~(gctx: global_ctx) =
            true_case = recurse true_case;
            false_case = recurse false_case }
 
-    | List [Ident "operator"; Ident s] ->
-      Operator s
-
     | List (Ident f :: args) ->
       let recurse = go ~lctx ~local_scopes ~block_level:false in
       Builtin (f, List.map recurse args)
@@ -183,21 +180,21 @@ let build_with ~(gctx: global_ctx) =
       raise (Invalid_argument "nil cannot be evaluated")
 
     | Ident name ->
-      let id =
-        match Utils.search (StringMap.find_opt name) local_scopes with
-        | Some id -> Local id
-        | None ->
-          match StringMap.find_opt name gctx.globals with
-          | Some id -> Global id
-          | None ->
-            (* If an undefined variable is referenced in the global scope, we
-             * throw an error. Note that many Scheme implementations allow global
-             * variables to be defined using 'set!', which would make this error
-             * incorrect. However, such usage of 'set!' is not standard-compliant,
-             * so we don't have to support it. *)
-            raise (Invalid_argument (Printf.sprintf "undefined variable: %s" name))
-      in
-      Var id
+      (match Utils.search (StringMap.find_opt name) local_scopes with
+       | Some id -> Var (Local id)
+       | None ->
+         match StringMap.find_opt name gctx.globals with
+         | Some id -> Var (Global id)
+         | None ->
+           match Operator.lookup name with
+           | Some op -> OperatorArg op
+           | None ->
+             (* If an undefined variable is referenced in the global scope, we
+              * throw an error. Note that many Scheme implementations allow global
+              * variables to be defined using 'set!', which would make this error
+              * incorrect. However, such usage of 'set!' is not standard-compliant,
+              * so we don't have to support it. *)
+             raise (Invalid_argument (Printf.sprintf "undefined variable: %s" name)))
 
     | Int i ->
       Int i

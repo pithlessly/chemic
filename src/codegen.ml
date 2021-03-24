@@ -2,12 +2,12 @@ type expr = Expr.expr =
   | Int of int64
   | String of Expr.string_id
   | Var of Expr.var_id
+  | OperatorArg of Operator.t
   | Define of Expr.var_id * expr
   | Let of { lhs: Expr.local_var_id; rhs: expr; body: expr list }
   | Lambda of Expr.proc_id
   | If of { condition: expr; true_case: expr; false_case: expr }
   | Builtin of string * expr list
-  | Operator of string
 
 let bprintf = Printf.bprintf
 
@@ -135,14 +135,11 @@ let write_expr ~rctx =
            List.iter (fun w -> w buf) args_writers;
            impl_writer buf)
 
-      | Operator fn ->
-        (match Operator.lookup fn with
-         | None ->
-           raise (Invalid_argument (Printf.sprintf "invalid operator: \"%s\""
-                                      (String.escaped fn)))
-         | Some { proc_ident; _ } ->
-           fun buf ->
-             bprintf buf "MAKE_PROC(%t,&operator_%s);" (Register.write reg) proc_ident)
+      | OperatorArg op ->
+        fun buf ->
+          bprintf buf "MAKE_PROC(%t,&operator_%s);"
+            (Register.write reg)
+            op.proc_ident
 
   in fun expr -> go ~reg:(Register.zero rctx) expr
 

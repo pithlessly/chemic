@@ -187,7 +187,11 @@ Obj len(Obj a) {
 Obj cons(Obj a, Obj b) {
     Cons *c = heap_alloc(alignof(Cons), sizeof(Cons));
     if (!c) {
-        DIE("out of memory");
+        gc_collect();
+        c = heap_alloc(alignof(Cons), sizeof(Cons));
+        if (!c) {
+            DIE("out of memory");
+        }
     }
 
     c->gc_tag = NULL;

@@ -86,7 +86,7 @@ let get_op = function
   | Ident "cons" -> Cons
   | Ident "call" -> Call
   | Ident "dbg" -> Debug
-  | Ident "gc" -> GcCollect
+  | Ident "gc-collect" -> GcCollect
   | Ident s ->
     raise (Invalid_argument (Printf.sprintf "invalid operator: \"%s\""
                                (String.escaped s)))

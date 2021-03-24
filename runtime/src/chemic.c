@@ -247,4 +247,11 @@ void display(Obj a) {
 
 void finalize() {
     free(call_args.buf);
+    call_args.len = 0;
+    call_args.cap = 0;
+
+    free(heap.alive);
+    free(heap.dead);
+    heap.len = 0;
+    heap.cap = 0;
 }

@@ -28,21 +28,17 @@ type expr =
 module StringMap = Map.Make(String)
 module IntMap = Map.Make(Int)
 
-(* Tracks how a local variable came to be in scope. *)
-type local_source =
-  (* If it was declared as a parameter, it should be initialized
-   * to the value of that parameter. *)
-  | Param_source
-  (* If it was declared using 'define', it should be initialized
-   * to NIL because it can be used before it is initialized. *)
-  | Define_source
-  (* If it was declared using 'let', it can be left uninitialized
-   * because there is no way to access it prior to initialization. *)
-  | Let_source
+type var_metadata = {
+  source: [`Param | `Internal];
+  mutable boxed: bool;
+}
 
 type local_ctx = {
-  mutable var_metadata: local_source IntMap.t;
+  mutable vars: var_metadata IntMap.t;
 }
+
+let add_local_var id source lctx =
+  lctx.vars <- IntMap.add id { source; boxed = false } lctx.vars
 
 type local = {
   lctx: local_ctx;
@@ -86,6 +82,32 @@ let build_with ~(gctx: global_ctx) =
       ~(block_level: bool) =
     function
 
+    | Ident name ->
+      (match Utils.search (StringMap.find_opt name) local_scopes with
+       | Some id -> Var (Local id)
+       | None ->
+         match StringMap.find_opt name gctx.globals with
+         | Some id -> Var (Global id)
+         | None ->
+           match Operator.lookup name with
+           | Some op -> OperatorArg op
+           | None ->
+             (* If an undefined variable is referenced in the global scope, we
+              * throw an error. Note that many Scheme implementations allow global
+              * variables to be defined using 'set!', which would make this error
+              * incorrect. However, such usage of 'set!' is not standard-compliant,
+              * so we don't have to support it. *)
+             raise (Invalid_argument (Printf.sprintf "undefined variable: %s" name)))
+
+    | List [Ident "box"; Ident ident] ->
+      (match Utils.search (StringMap.find_opt ident) local_scopes with
+       | Some id ->
+         let meta = IntMap.find id lctx.vars in
+         meta.boxed <- true;
+         Var (Local id)
+       | None ->
+         raise (Invalid_argument "undefined variable"))
+
     | List [Ident "define"; Ident ident; expr] ->
       let id =
         if not block_level then
@@ -103,19 +125,19 @@ let build_with ~(gctx: global_ctx) =
     | List (Ident "let" ::
             List [List [Ident lhs; rhs]] ::
             body) ->
-      let id_offset = IntMap.cardinal lctx.var_metadata in
+      let id_offset = IntMap.cardinal lctx.vars in
       let scope =
         find_defined_vars body
         |> Utils.seq_mapi (fun i var ->
             let id = id_offset + i in
-            lctx.var_metadata <- IntMap.add id Define_source lctx.var_metadata;
+            lctx |> add_local_var id `Internal;
             (var, id)
           )
         |> StringMap.of_seq
       in
       let var_id = id_offset + StringMap.cardinal scope in
+      lctx |> add_local_var var_id `Internal;
       let scope = StringMap.add lhs var_id scope in
-      lctx.var_metadata <- IntMap.add var_id Let_source lctx.var_metadata;
       let recurse_rhs =
         go ~lctx ~local_scopes ~block_level:false
       in
@@ -130,18 +152,18 @@ let build_with ~(gctx: global_ctx) =
       if Utils.null body then
         raise (Invalid_argument "lambda body cannot be empty");
 
-      let lctx = { var_metadata = IntMap.empty } in
+      let lctx = { vars = IntMap.empty } in
 
       (* get sequences of two kinds of local variables and their sources *)
       let param_vars =
         List.to_seq params
         |> Seq.map (function
-            | Ident var -> (var, Param_source)
+            | Ident var -> (var, `Param)
             | _ -> raise (Invalid_argument "lambda parameters must be identifiers"))
       in
       let defined_vars =
         find_defined_vars body
-        |> Seq.map (fun var -> (var, Define_source))
+        |> Seq.map (fun var -> (var, `Internal))
       in
 
       (* construct the initial scope containing those variables *)
@@ -149,7 +171,7 @@ let build_with ~(gctx: global_ctx) =
         Seq.append param_vars defined_vars
         |> Utils.seq_mapi (fun i (var, source) ->
             let id = i in
-            lctx.var_metadata <- IntMap.add id source lctx.var_metadata;
+            lctx |> add_local_var id source;
             (var, id)
           )
         |> StringMap.of_seq
@@ -186,23 +208,6 @@ let build_with ~(gctx: global_ctx) =
     | List [] ->
       raise (Invalid_argument "nil cannot be evaluated")
 
-    | Ident name ->
-      (match Utils.search (StringMap.find_opt name) local_scopes with
-       | Some id -> Var (Local id)
-       | None ->
-         match StringMap.find_opt name gctx.globals with
-         | Some id -> Var (Global id)
-         | None ->
-           match Operator.lookup name with
-           | Some op -> OperatorArg op
-           | None ->
-             (* If an undefined variable is referenced in the global scope, we
-              * throw an error. Note that many Scheme implementations allow global
-              * variables to be defined using 'set!', which would make this error
-              * incorrect. However, such usage of 'set!' is not standard-compliant,
-              * so we don't have to support it. *)
-             raise (Invalid_argument (Printf.sprintf "undefined variable: %s" name)))
-
     | Int i ->
       Int i
 
@@ -214,7 +219,7 @@ let build_with ~(gctx: global_ctx) =
 
   in
   fun forms ->
-    let lctx = { var_metadata = IntMap.empty } in
+    let lctx = { vars = IntMap.empty } in
     find_defined_vars forms
     |> Utils.seq_iteri (fun i var ->
         let id = i in
@@ -231,15 +236,18 @@ type local_writers = {
   body: expr list;
 }
 
-let write_local { lctx = { var_metadata }; body } =
+let write_local { lctx; body } =
   let local_decls =
-    IntMap.to_seq var_metadata
+    IntMap.to_seq lctx.vars
     |> Seq.map (function
-        | _, Param_source -> "UNSAFE_NEXT_ARG"
-        | _, Define_source
-        | _, Let_source -> "NIL")
+        | _, { source = `Param; _ } -> "UNSAFE_NEXT_ARG"
+        | _, { source = `Internal; boxed } ->
+          if boxed then
+            "NIL /* boxed */"
+          else
+            "NIL")
   in
-  { local_decls; num_decls = IntMap.cardinal var_metadata; body }
+  { local_decls; num_decls = IntMap.cardinal lctx.vars; body }
 
 type proc_writers = {
   name: Writer.t;

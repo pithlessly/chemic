@@ -121,8 +121,8 @@ size_t gc_mark_and_copy(Obj *o) {
                     hs->gc_tag = new;
                 }
                 o->data.hs = hs->gc_tag;
-                break;
             }
+            break;
 
         case tag_cons:
             {
@@ -138,6 +138,22 @@ size_t gc_mark_and_copy(Obj *o) {
                     c->gc_tag = new;
                 }
                 o->data.c = c->gc_tag;
+            }
+            break;
+
+        case tag_cell:
+            {
+                Cell *c = o->data.ce;
+                if (c->gc_tag == NULL) {
+                    gc_mark_and_copy(&c->contents);
+                    Cell *new = heap_alloc(alignof(Cell), sizeof(Cell));
+                    if (new == NULL) {
+                        DIE("out of memory");
+                    }
+                    *new = *c;
+                    c->gc_tag = new;
+                }
+                o->data.ce = c->gc_tag;
             }
             break;
     }
@@ -245,6 +261,21 @@ Obj cons(Obj a, Obj b) {
     return a;
 }
 
+Obj make_ref(Obj a) {
+    Cell *c = try_heap_alloc(alignof(Cell), sizeof(Cell));
+
+    c->gc_tag = NULL;
+    c->contents = a;
+    a.tag = tag_cell;
+    a.data.ce = c;
+    return a;
+}
+
+Obj deref(Obj a) {
+    EXPECT(a, tag_cell);
+    return a.data.ce->contents;
+}
+
 ArgVec call_args = { NULL, 0, 0 };
 
 Obj call(Obj a) {
@@ -301,6 +332,9 @@ void display(Obj a) {
             putchar('(');
             display_cons_items(*a.data.c);
             putchar(')');
+            break;
+        case tag_cell:
+            fputs("#<cell>", stdout);
             break;
     }
 }

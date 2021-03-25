@@ -17,7 +17,8 @@ typedef enum {
     tag_proc,
     tag_str,
     tag_heap_str,
-    tag_cons
+    tag_cons,
+    tag_cell,
 } Tag;
 
 typedef struct {
@@ -25,8 +26,9 @@ typedef struct {
     uint8_t data[];
 } Str;
 
-typedef struct Cons_s Cons;
 typedef struct HeapStr_s HeapStr;
+typedef struct Cons_s Cons;
+typedef struct Cell_s Cell;
 
 typedef struct Obj_s {
     Tag tag;
@@ -36,8 +38,14 @@ typedef struct Obj_s {
         Str *s;
         HeapStr *hs;
         Cons *c;
+        Cell *ce;
     } data;
 } Obj;
+
+struct HeapStr_s {
+    HeapStr *gc_tag;
+    Str s;
+};
 
 struct Cons_s {
     Cons *gc_tag;
@@ -45,9 +53,9 @@ struct Cons_s {
     Obj cdr;
 };
 
-struct HeapStr_s {
-    HeapStr *gc_tag;
-    Str s;
+struct Cell_s {
+    Cell *gc_tag;
+    Obj contents;
 };
 
 typedef struct {
@@ -72,6 +80,7 @@ inline static char const* classify(Tag t) {
         case tag_str:
         case tag_heap_str: return "string";
         case tag_cons:     return "cons";
+        case tag_cell:     return "cell";
     }
 }
 
@@ -160,6 +169,8 @@ extern Obj less_than(Obj a, Obj b);
 extern Obj len(Obj a);
 extern Obj string_copy(Obj a);
 extern Obj cons(Obj a, Obj b);
+extern Obj make_ref(Obj a);
+extern Obj deref(Obj a);
 extern Obj call(Obj a);
 extern void display(Obj a);
 

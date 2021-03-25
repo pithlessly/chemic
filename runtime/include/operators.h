@@ -65,6 +65,16 @@ static Obj operator_cons() {
     return cons(call_args.buf[0], call_args.buf[1]);
 }
 
+static Obj operator_make_ref() {
+    expect_args_exact(1);
+    return make_ref(call_args.buf[0]);
+}
+
+static Obj operator_deref() {
+    expect_args_exact(1);
+    return deref(call_args.buf[0]);
+}
+
 static Obj operator_string_copy() {
     expect_args_exact(1);
     return string_copy(call_args.buf[0]);

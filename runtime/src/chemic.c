@@ -114,6 +114,9 @@ size_t gc_mark_and_copy(Obj *o) {
                 if (hs->gc_tag == NULL) {
                     size_t size = sizeof(HeapStr) + hs->s.len;
                     HeapStr *new = heap_alloc(alignof(HeapStr), size);
+                    if (new == NULL) {
+                        DIE("out of memory");
+                    }
                     memcpy(new, hs, size);
                     hs->gc_tag = new;
                 }
@@ -127,8 +130,10 @@ size_t gc_mark_and_copy(Obj *o) {
                 if (c->gc_tag == NULL) {
                     gc_mark_and_copy(&c->car);
                     gc_mark_and_copy(&c->cdr);
-                    // should not be nil, since the heap is large enough
                     Cons *new = heap_alloc(alignof(Cons), sizeof(Cons));
+                    if (new == NULL) {
+                        DIE("out of memory");
+                    }
                     *new = *c;
                     c->gc_tag = new;
                 }

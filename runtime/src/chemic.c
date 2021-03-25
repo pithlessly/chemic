@@ -1,5 +1,6 @@
 #include "chemic.h"
 
+#include <string.h>
 #include <inttypes.h>
 #include <stdalign.h>
 
@@ -54,6 +55,18 @@ void *heap_alloc(size_t align, size_t len) {
     }
 }
 
+void *try_heap_alloc(size_t align, size_t len) {
+    void *p = heap_alloc(align, len);
+    if (!p) {
+        gc_collect();
+        p = heap_alloc(align, len);
+        if (!p) {
+            DIE("out of memory");
+        }
+    }
+    return p;
+}
+
 #define CALL_STACK_MAX_HEIGHT 2048
 
 typedef struct {
@@ -94,6 +107,20 @@ size_t gc_mark_and_copy(Obj *o) {
         case tag_proc:
         case tag_str:
             break;
+
+        case tag_heap_str:
+            {
+                HeapStr *hs = o->data.hs;
+                if (hs->gc_tag == NULL) {
+                    size_t size = sizeof(HeapStr) + hs->s.len;
+                    HeapStr *new = heap_alloc(alignof(HeapStr), size);
+                    memcpy(new, hs, size);
+                    hs->gc_tag = new;
+                }
+                o->data.hs = hs->gc_tag;
+                break;
+            }
+
         case tag_cons:
             {
                 Cons *c = o->data.c;
@@ -173,22 +200,37 @@ Obj less_than(Obj a, Obj b) {
     return a.data.i < b.data.i ? TRUE : FALSE;
 }
 
+Str *expect_str(Obj a) {
+    switch (a.tag) {
+        case tag_str:
+            return a.data.s;
+        case tag_heap_str:
+            return &a.data.hs->s;
+        default:
+            EXPECT(a, tag_str);
+    }
+}
+
 Obj len(Obj a) {
-    EXPECT(a, tag_str);
-    size_t len = a.data.s->len;
+    size_t len = expect_str(a)->len;
     MAKE_INT(a, len);
     return a;
 }
 
+Obj string_copy(Obj a) {
+    Str *s = expect_str(a);
+    HeapStr *hs = try_heap_alloc(alignof(HeapStr), sizeof(HeapStr) + s->len);
+
+    hs->gc_tag = NULL;
+    memcpy(&hs->s, s, sizeof(Str) + s->len);
+
+    a.tag = tag_heap_str;
+    a.data.hs = hs;
+    return a;
+}
+
 Obj cons(Obj a, Obj b) {
-    Cons *c = heap_alloc(alignof(Cons), sizeof(Cons));
-    if (!c) {
-        gc_collect();
-        c = heap_alloc(alignof(Cons), sizeof(Cons));
-        if (!c) {
-            DIE("out of memory");
-        }
-    }
+    Cons *c = try_heap_alloc(alignof(Cons), sizeof(Cons));
 
     c->gc_tag = NULL;
     c->car = a;
@@ -203,6 +245,10 @@ ArgVec call_args = { NULL, 0, 0 };
 Obj call(Obj a) {
     EXPECT(a, tag_proc);
     return a.data.p();
+}
+
+static void display_str(Str *s) {
+    fwrite(&s->data, sizeof(uint8_t), s->len, stdout);
 }
 
 static void display_cons_items(Cons c) {
@@ -241,7 +287,10 @@ void display(Obj a) {
             fputs("#<procedure>", stdout);
             break;
         case tag_str:
-            fwrite(&a.data.s->data, sizeof(uint8_t), a.data.s->len, stdout);
+            display_str(a.data.s);
+            break;
+        case tag_heap_str:
+            display_str(&a.data.hs->s);
             break;
         case tag_cons:
             putchar('(');

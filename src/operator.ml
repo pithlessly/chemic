@@ -87,6 +87,10 @@ let all_ops =
     (make_binary ~proc_ident:"cons"
        (fun out a b buf -> bprintf buf "%t=cons(%t,%t);" out a b))
 
+  |> StringMap.add "string-copy"
+    (make_unary ~proc_ident:"string_copy"
+       (fun out a buf -> bprintf buf "%t=string_copy(%t);" out a))
+
   |> StringMap.add "dbg"
     (make_nullary_nil ~proc_ident:"dbg" "gc_debug();")
 

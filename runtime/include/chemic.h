@@ -16,6 +16,7 @@ typedef enum {
     tag_int,
     tag_proc,
     tag_str,
+    tag_heap_str,
     tag_cons
 } Tag;
 
@@ -25,6 +26,7 @@ typedef struct {
 } Str;
 
 typedef struct Cons_s Cons;
+typedef struct HeapStr_s HeapStr;
 
 typedef struct Obj_s {
     Tag tag;
@@ -32,6 +34,7 @@ typedef struct Obj_s {
         int64_t i;
         struct Obj_s (*p)();
         Str *s;
+        HeapStr *hs;
         Cons *c;
     } data;
 } Obj;
@@ -40,6 +43,11 @@ struct Cons_s {
     Cons *gc_tag;
     Obj car;
     Obj cdr;
+};
+
+struct HeapStr_s {
+    HeapStr *gc_tag;
+    Str s;
 };
 
 typedef struct {
@@ -56,13 +64,14 @@ extern ArgVec call_args;
 
 inline static char const* classify(Tag t) {
     switch (t) {
-        case tag_nil: return "nil";
+        case tag_nil:      return "nil";
         case tag_true:
-        case tag_false: return "boolean";
-        case tag_int: return "int";
-        case tag_proc: return "procedure";
-        case tag_str: return "string";
-        case tag_cons: return "cons";
+        case tag_false:    return "boolean";
+        case tag_int:      return "int";
+        case tag_proc:     return "procedure";
+        case tag_str:
+        case tag_heap_str: return "string";
+        case tag_cons:     return "cons";
     }
 }
 
@@ -149,6 +158,7 @@ extern Obj neg(Obj a);
 extern Obj mul(Obj a, Obj b);
 extern Obj less_than(Obj a, Obj b);
 extern Obj len(Obj a);
+extern Obj string_copy(Obj a);
 extern Obj cons(Obj a, Obj b);
 extern Obj call(Obj a);
 extern void display(Obj a);

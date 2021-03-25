@@ -65,6 +65,11 @@ static Obj operator_cons() {
     return cons(call_args.buf[0], call_args.buf[1]);
 }
 
+static Obj operator_string_copy() {
+    expect_args_exact(1);
+    return string_copy(call_args.buf[0]);
+}
+
 static Obj operator_dbg() {
     expect_args_exact(0);
     gc_debug();

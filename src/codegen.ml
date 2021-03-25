@@ -42,14 +42,16 @@ end = struct
   let write r buf = bprintf buf "r[REG+%d]" r
 end
 
-let write_access_var = function
+let write_access_var ~is_boxed = function
   | Expr.Global id -> fun buf -> bprintf buf "g[%d]" id
-  | Expr.Local id -> fun buf -> bprintf buf "r[%d]" id
+  | Expr.Local id ->
+    fun buf -> bprintf buf
+        (if is_boxed id then "BOX_CONTENTS(r[%d])" else "r[%d]") id
 
 (* Return a Writer.t that emits a sequence of statements which have the
  * effect of evaluating the given expression and assigning the return value
  * to the given register. *)
-let write_expr ~rctx =
+let write_expr ~is_boxed ~rctx =
   let rec go ~reg = function
     | Int i -> fun buf ->
       bprintf buf "MAKE_INT(%t,%Ld);" (Register.write reg) i
@@ -59,7 +61,9 @@ let write_expr ~rctx =
       fun buf -> bprintf buf "MAKE_STRING(%t,%t);" (Register.write reg) str
 
     | Var id ->
-      fun buf -> bprintf buf "%t=%t;" (Register.write reg) (write_access_var id)
+      fun buf -> bprintf buf "%t=%t;"
+          (Register.write reg)
+          (write_access_var ~is_boxed id)
 
     | OperatorArg op ->
       fun buf ->
@@ -69,7 +73,7 @@ let write_expr ~rctx =
 
     | Define (id, x) ->
       let expr = go ~reg x in
-      let var = write_access_var id in
+      let var = write_access_var ~is_boxed id in
       fun buf ->
         bprintf buf "%t%t=%t;MAKE_NIL(%t);"
           expr
@@ -79,7 +83,7 @@ let write_expr ~rctx =
 
     | Let { lhs; rhs; body } ->
       let rhs = go ~reg rhs in
-      let var = write_access_var (Expr.Local lhs) in
+      let var = write_access_var ~is_boxed (Expr.Local lhs) in
       let body = List.map (go ~reg) body in
       fun buf ->
         rhs buf;
@@ -161,22 +165,47 @@ let write_expr ~rctx =
 
 (* Write the content of a function body which is common to both
  * procedures and the top level *)
-let write_local (local: Expr.local_writers) =
+let write_local (local: Expr.local_data) =
+  let is_boxed id = local.locals.(id).boxed in
   let rctx = Register.init () in
-  let body = List.map (write_expr ~rctx) local.body in
+
+  let body = List.map (write_expr ~is_boxed ~rctx) local.body in
+
+  let num_locals = Array.length local.locals in
   let num_regs = Register.allocated rctx in
-  let aux_size = local.num_decls + num_regs in
+  let aux_size = num_locals + num_regs in
 
   fun buf ->
-    bprintf buf "  Obj r[%d];" aux_size;
-    Utils.seq_iteri (bprintf buf "r[%d]=%s;") local.local_decls;
-    bprintf buf "\n  const size_t REG=%d;" local.num_decls;
-    for i = 0 to num_regs - 1 do
-      bprintf buf "r[REG+%d]=NIL;" i
+    bprintf buf "  Obj r[%d];const size_t REG=%d;\n  " aux_size num_locals;
+    (* Emit initialization of vars representing local variables to their correct
+     * values, and collect a list of all variables that need to be boxed. Boxes
+     * can only be allocated after the call to `gc_push_roots` because `make_ref`
+     * can allocate and trigger the GC, which needs to update every pointer. *)
+    let boxed_vars =
+      (* fold state: counter and list of boxed vars *)
+      let init_state = (0, []) in
+      local.locals
+      |> Array.fold_left (fun (i, boxed_vars) (meta: Expr.var_metadata) ->
+          bprintf buf "r[%d]=%s;" i
+            (match meta.source with
+             |`Param -> "UNSAFE_NEXT_ARG"
+             | `Internal -> "NIL");
+          (i + 1, if meta.boxed then i :: boxed_vars else boxed_vars)
+        ) init_state
+      |> snd |> List.rev
+    in
+    (* Emit initialization of vars representing registers to nil *)
+    for i = num_locals to aux_size - 1 do
+      bprintf buf "r[%d]=NIL;" i
     done;
-    bprintf buf "\n  gc_push_roots(r,%d);\n" aux_size;
-    List.iter (bprintf buf "  %t\n") body;
-    Buffer.add_string buf "  gc_pop_roots();\n"
+    (* Emit function which notifies the GC to track these values *)
+    bprintf buf "\n  gc_push_roots(r,%d);" aux_size;
+    (* Emit allocation of cells for boxed locals *)
+    boxed_vars |> List.iter (fun i -> bprintf buf "r[%d]=make_ref(r[%d]);" i i);
+    (* Emit the actual function body contents *)
+    List.iter (bprintf buf "\n  %t") body;
+    (* Emit function which notifies the GC to stop tracking the registers *)
+    Buffer.add_string buf "\n  gc_pop_roots();\n"
 
 (* Write a function implementing the body of a procedure *)
 let write_proc (proc: Expr.proc_writers) =
@@ -188,7 +217,7 @@ let write_proc (proc: Expr.proc_writers) =
     bprintf buf "  return r[REG];\n}\n"
 
 (* Write main(), implementing the top-level procedure *)
-let write_main (top_level: Expr.local_writers) =
+let write_main (top_level: Expr.local_data) =
   let local = write_local top_level in
   fun buf ->
     Buffer.add_string buf "int main() {\n";

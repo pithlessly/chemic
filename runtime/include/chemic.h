@@ -128,6 +128,8 @@ inline static char const* classify(Tag t) {
 #define TRUE (Obj) {tag_true}
 #define FALSE (Obj) {tag_false}
 
+#define BOX_CONTENTS(A) ((A).data.ce->contents)
+
 /* inline */ static void arg_init(size_t n) {
     call_args.len = 0;
     if (n > call_args.cap) {

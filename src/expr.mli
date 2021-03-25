@@ -27,13 +27,15 @@ type expr =
   | Call of expr * expr list
   | Operator of Operator.t * expr list
 
-(* writer data common to both procedures and the top-level *)
-type local_writers = {
-  (* expressions to initialize local variables, to be placed
-   * at the start of the procedure *)
-  local_decls: string Seq.t;
-  (* the length of `local_decls` *)
-  num_decls: int;
+type var_metadata = {
+  source: [`Param | `Internal];
+  boxed: bool;
+}
+
+(* data common to both procedures and the top-level *)
+type local_data = {
+  (* metadata about each local variable *)
+  locals: var_metadata array;
   (* the body of the procedure *)
   body: expr list;
 }
@@ -44,7 +46,7 @@ type proc_writers = {
   name: Writer.t;
   (* the number of parameters that the procedure takes *)
   num_params: int;
-  local: local_writers;
+  local: local_data;
 }
 
 type global_writers = {
@@ -53,7 +55,7 @@ type global_writers = {
   (* information needed to define procedures *)
   procs: proc_writers list;
   (* information needed in main() *)
-  main: local_writers;
+  main: local_data;
   (* additional statements to be placed at the end of main() *)
   after_main: Writer.t;
 }

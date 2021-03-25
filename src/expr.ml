@@ -30,7 +30,7 @@ module IntMap = Map.Make(Int)
 
 type var_metadata = {
   source: [`Param | `Internal];
-  mutable boxed: bool;
+  boxed: bool;
 }
 
 type local_ctx = {
@@ -39,6 +39,10 @@ type local_ctx = {
 
 let add_local_var id source lctx =
   lctx.vars <- IntMap.add id { source; boxed = false } lctx.vars
+
+let make_local_boxed id lctx =
+  let metadata = IntMap.find id lctx.vars in
+  lctx.vars <- IntMap.add id { metadata with boxed = true } lctx.vars
 
 type local = {
   lctx: local_ctx;
@@ -102,8 +106,7 @@ let build_with ~(gctx: global_ctx) =
     | List [Ident "box"; Ident ident] ->
       (match Utils.search (StringMap.find_opt ident) local_scopes with
        | Some id ->
-         let meta = IntMap.find id lctx.vars in
-         meta.boxed <- true;
+         lctx |> make_local_boxed id;
          Var (Local id)
        | None ->
          raise (Invalid_argument "undefined variable"))
@@ -230,35 +233,28 @@ let build_with ~(gctx: global_ctx) =
 
 let bprintf = Printf.bprintf
 
-type local_writers = {
-  local_decls: string Seq.t;
-  num_decls: int;
+type local_data = {
+  locals: var_metadata array;
   body: expr list;
 }
 
 let write_local { lctx; body } =
-  let local_decls =
-    IntMap.to_seq lctx.vars
-    |> Seq.map (function
-        | _, { source = `Param; _ } -> "UNSAFE_NEXT_ARG"
-        | _, { source = `Internal; boxed } ->
-          if boxed then
-            "NIL /* boxed */"
-          else
-            "NIL")
-  in
-  { local_decls; num_decls = IntMap.cardinal lctx.vars; body }
+  { locals =
+      IntMap.to_seq lctx.vars
+      |> Seq.map snd
+      |> Array.of_seq;
+    body }
 
 type proc_writers = {
   name: Writer.t;
   num_params: int;
-  local: local_writers;
+  local: local_data;
 }
 
 type global_writers = {
   decls: Writer.t;
   procs: proc_writers list;
-  main: local_writers;
+  main: local_data;
   after_main: Writer.t;
 }
 

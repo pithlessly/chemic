@@ -14,15 +14,6 @@ let unzip_with f =
       loop (l :: lef) (r :: rig) xs
   in loop [] []
 
-let seq_init (n: int) (f: int -> 'a): 'a Seq.t =
-  let rec loop idx () =
-    if idx < n then
-      let v = f idx in
-      Seq.Cons (v, loop (idx + 1))
-    else
-      Seq.Nil
-  in loop 0
-
 let seq_mapi f seq =
   let rec loop i seq () =
     match seq () with

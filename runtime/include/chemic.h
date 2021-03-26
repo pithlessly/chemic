@@ -139,7 +139,14 @@ inline static char const* classify(Tag t) {
 #define TRUE (Obj) {tag_true}
 #define FALSE (Obj) {tag_false}
 
-#define BOX_CONTENTS(A) ((A).data.ce->contents)
+#define ENV_INIT(VAR, N) \
+    Vect *VAR = alloc_vect(N)
+
+#define ENV_LOCAL(ENV, I) \
+    ((ENV)->contents[I])
+
+#define ENV_ROOTS(ENV) \
+    ((ENV)->contents)
 
 /* inline */ static void arg_init(size_t n) {
     call_args.len = 0;
@@ -182,11 +189,11 @@ extern Obj less_than(Obj a, Obj b);
 extern Obj len(Obj a);
 extern Obj string_copy(Obj a);
 extern Obj cons(Obj a, Obj b);
-extern Obj make_ref(Obj a);
-extern Obj deref(Obj a);
 extern Obj make_counter();
 extern Obj call(Obj a);
 extern void display(Obj a);
+
+extern Vect *alloc_vect(size_t len);
 
 extern void gc_push_roots(Obj *roots, size_t count);
 extern void gc_pop_roots();

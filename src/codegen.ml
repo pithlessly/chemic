@@ -42,16 +42,10 @@ end = struct
   let write r buf = bprintf buf "r[REG+%d]" r
 end
 
-let write_access_var ~is_boxed = function
-  | Expr.Global id -> fun buf -> bprintf buf "g[%d]" id
-  | Expr.Local id ->
-    fun buf -> bprintf buf
-        (if is_boxed id then "BOX_CONTENTS(r[%d])" else "r[%d]") id
-
 (* Return a Writer.t that emits a sequence of statements which have the
  * effect of evaluating the given expression and assigning the return value
  * to the given register. *)
-let write_expr ~is_boxed ~rctx =
+let write_expr ~write_access_var ~rctx =
   let rec go ~reg = function
     | Int i -> fun buf ->
       bprintf buf "MAKE_INT(%t,%Ld);" (Register.write reg) i
@@ -63,7 +57,7 @@ let write_expr ~is_boxed ~rctx =
     | Var id ->
       fun buf -> bprintf buf "%t=%t;"
           (Register.write reg)
-          (write_access_var ~is_boxed id)
+          (write_access_var id)
 
     | OperatorArg op ->
       fun buf ->
@@ -73,7 +67,7 @@ let write_expr ~is_boxed ~rctx =
 
     | Define (id, x) ->
       let expr = go ~reg x in
-      let var = write_access_var ~is_boxed id in
+      let var = write_access_var id in
       fun buf ->
         bprintf buf "%t%t=%t;MAKE_NIL(%t);"
           expr
@@ -83,7 +77,7 @@ let write_expr ~is_boxed ~rctx =
 
     | Let { lhs; rhs; body } ->
       let rhs = go ~reg rhs in
-      let var = write_access_var ~is_boxed (Expr.Local lhs) in
+      let var = write_access_var (Expr.Local lhs) in
       let body = List.map (go ~reg) body in
       fun buf ->
         rhs buf;
@@ -166,46 +160,89 @@ let write_expr ~is_boxed ~rctx =
 (* Write the content of a function body which is common to both
  * procedures and the top level *)
 let write_local (local: Expr.local_data) =
-  let is_boxed id = local.locals.(id).boxed in
+  (* create separate sequences of incrementing IDs for boxed
+   * and unboxed variables *)
+  let num_boxed = ref 0 in
+  let num_unboxed = ref 0 in
+  let boxed_unboxed_idxs: [`Boxed of int | `Unboxed of int] array =
+    local.locals |> Array.map (fun (var: Expr.var_metadata) ->
+        if var.boxed then
+          let id = !num_boxed in
+          num_boxed := id + 1;
+          `Boxed id
+        else
+          let id = !num_unboxed in
+          num_unboxed := id + 1;
+          `Unboxed id
+      )
+  in
+
+  (* generate writers for every expr in the function body *)
   let rctx = Register.init () in
+  let body =
+    (* convert an `Expr.var_id` to an lvalue *)
+    let write_access_var = function
+      | Expr.Global id -> fun buf -> bprintf buf "g[%d]" id
+      | Expr.Local id ->
+        match boxed_unboxed_idxs.(id) with
+        | `Boxed id ->
+          fun buf -> bprintf buf "ENV_LOCAL(e,%d)" id
+        | `Unboxed id ->
+          fun buf -> bprintf buf "r[%d]" id
+    in
+    List.map (write_expr ~write_access_var ~rctx) local.body
+  in
 
-  let body = List.map (write_expr ~is_boxed ~rctx) local.body in
+  (* the `r` array will hold all unboxed variables, followed
+   * by temporaries needed for expression evaluation *)
+  let num_temps = Register.allocated rctx in
+  let num_registers = !num_unboxed + num_temps in
 
-  let num_locals = Array.length local.locals in
-  let num_regs = Register.allocated rctx in
-  let aux_size = num_locals + num_regs in
+  (* the `e` array will hold all boxed variables *)
+  let do_alloc_e = !num_boxed > 0 in
 
   fun buf ->
-    bprintf buf "  Obj r[%d];const size_t REG=%d;\n  " aux_size num_locals;
-    (* Emit initialization of vars representing local variables to their correct
-     * values, and collect a list of all variables that need to be boxed. Boxes
-     * can only be allocated after the call to `gc_push_roots` because `make_ref`
-     * can allocate and trigger the GC, which needs to update every pointer. *)
-    let boxed_vars =
-      (* fold state: counter and list of boxed vars *)
-      let init_state = (0, []) in
-      local.locals
-      |> Array.fold_left (fun (i, boxed_vars) (meta: Expr.var_metadata) ->
-          bprintf buf "r[%d]=%s;" i
-            (match meta.source with
-             |`Param -> "UNSAFE_NEXT_ARG"
-             | `Internal -> "NIL");
-          (i + 1, if meta.boxed then i :: boxed_vars else boxed_vars)
-        ) init_state
-      |> snd |> List.rev
-    in
-    (* Emit initialization of vars representing registers to nil *)
-    for i = num_locals to aux_size - 1 do
-      bprintf buf "r[%d]=NIL;" i
+    bprintf buf "  Obj r[%d];" num_registers;
+    if do_alloc_e then
+      (* note that this can heap allocate and trigger GC *)
+      bprintf buf "ENV_INIT(e,%d);" !num_boxed;
+
+    (* offset into the register array where temporaries begin *)
+    bprintf buf "const size_t REG=%d;\n  " !num_unboxed;
+
+    (* emit initialization of local variables to their correct values *)
+    local.locals |> Array.iteri (fun i (meta: Expr.var_metadata) ->
+        let init_expr =
+          match meta.source with
+          | `Param -> "UNSAFE_NEXT_ARG"
+          | `Internal -> "NIL"
+        in
+        match boxed_unboxed_idxs.(i) with
+        | `Boxed id ->
+          bprintf buf "ENV_LOCAL(e,%d)=%s;" id init_expr
+        | `Unboxed id ->
+          bprintf buf "r[%d]=%s;" id init_expr
+      );
+
+    (* emit initialization of temporaries to nil *)
+    for i = 0 to num_temps - 1 do
+      bprintf buf "MAKE_NIL(r[REG+%d]);" i
     done;
-    (* Emit function which notifies the GC to track these values *)
-    bprintf buf "\n  gc_push_roots(r,%d);" aux_size;
-    (* Emit allocation of cells for boxed locals *)
-    boxed_vars |> List.iter (fun i -> bprintf buf "r[%d]=make_ref(r[%d]);" i i);
-    (* Emit the actual function body contents *)
+
+    (* notify the GC to track `r` *)
+    bprintf buf "\n  gc_push_roots(r,%d);" num_registers;
+    if do_alloc_e then
+      (* notify the GC to track `e` *)
+      bprintf buf "\n  gc_push_roots(ENV_ROOTS(e),%d);" !num_boxed;
+
+    (* emit the function body contents *)
     List.iter (bprintf buf "\n  %t") body;
-    (* Emit function which notifies the GC to stop tracking the registers *)
-    Buffer.add_string buf "\n  gc_pop_roots();\n"
+
+    (* notify the GC to stop tracking `r` as roots *)
+    bprintf buf "\n  gc_pop_roots();\n";
+    if do_alloc_e then
+      (* notify the GC to stop tracking `e` as roots *)
+      bprintf buf "  gc_pop_roots();\n"
 
 (* Write a function implementing the body of a procedure *)
 let write_proc (proc: Expr.proc_writers) =

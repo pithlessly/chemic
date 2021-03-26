@@ -67,6 +67,17 @@ void *try_heap_alloc(size_t align, size_t len) {
     return p;
 }
 
+// Allocate and return a new vector of the given length,
+// with the `len` and `gc_tag` fields correctly set, but
+// whose contents are uninitialized. Can trigger GC.
+Vect *alloc_vect(size_t len) {
+    size_t size = sizeof(Vect) + len * sizeof(Obj);
+    Vect *v = try_heap_alloc(alignof(Vect), size);
+    v->gc_tag = NULL;
+    v->len = len;
+    return v;
+}
+
 #define CALL_STACK_MAX_HEIGHT 2048
 
 typedef struct {
@@ -293,10 +304,7 @@ static Obj do_counter(Obj *vars) {
 
 Obj make_counter() {
     // allocate a vector to store the counter
-    size_t vect_size = sizeof(Vect) + 1*sizeof(Obj);
-    Vect *v = try_heap_alloc(alignof(Vect), vect_size);
-    v->gc_tag = NULL;
-    v->len = 1;
+    Vect *v = alloc_vect(1);
     MAKE_INT(v->contents[0], 0);
 
     // allocate a closure pointing to the vector

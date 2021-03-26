@@ -19,7 +19,7 @@ typedef enum {
     tag_str,
     tag_heap_str,
     tag_cons,
-    tag_cell,
+    tag_vect,
 } Tag;
 
 typedef struct {
@@ -29,7 +29,7 @@ typedef struct {
 
 typedef struct HeapStr_s HeapStr;
 typedef struct Cons_s Cons;
-typedef struct Cell_s Cell;
+typedef struct Vect_s Vect;
 typedef struct Closure_s Closure;
 
 typedef struct Obj_s {
@@ -41,7 +41,7 @@ typedef struct Obj_s {
         Str *s;
         HeapStr *hs;
         Cons *c;
-        Cell *ce;
+        Vect *v;
     } data;
 } Obj;
 
@@ -56,16 +56,16 @@ struct Cons_s {
     Obj cdr;
 };
 
-struct Cell_s {
-    Cell *gc_tag;
-    Obj contents;
+struct Vect_s {
+    Vect *gc_tag;
+    size_t len;
+    Obj contents[];
 };
 
 struct Closure_s {
     Closure *gc_tag;
-    Obj (*run)(Cell**);
-    size_t env_len;
-    Cell *env[];
+    Obj (*run)(Obj*);
+    Vect *env;
 };
 
 typedef struct {
@@ -91,7 +91,7 @@ inline static char const* classify(Tag t) {
         case tag_str:
         case tag_heap_str: return "string";
         case tag_cons:     return "cons";
-        case tag_cell:     return "cell";
+        case tag_vect:     return "vector";
     }
 }
 

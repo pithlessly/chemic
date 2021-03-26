@@ -87,14 +87,6 @@ let all_ops =
     (make_binary ~proc_ident:"cons"
        (fun out a b buf -> bprintf buf "%t=cons(%t,%t);" out a b))
 
-  |> StringMap.add "ref"
-    (make_unary ~proc_ident:"ref"
-       (fun out a buf -> bprintf buf "%t=make_ref(%t);" out a))
-
-  |> StringMap.add "!"
-    (make_unary ~proc_ident:"deref"
-       (fun out a buf -> bprintf buf "%t=deref(%t);" out a))
-
   |> StringMap.add "counter"
     (make_nullary ~proc_ident:"counter"
        (fun out buf -> bprintf buf "%t=make_counter();" out))

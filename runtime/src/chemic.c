@@ -98,7 +98,7 @@ void gc_debug() {
     printf("* alive heap used: %zu\n", heap.len);
 }
 
-static void gc_mark_and_copy_cell(Cell **c);
+static void gc_mark_and_copy_vect(Vect **v);
 
 void gc_mark_and_copy(Obj *o) {
     switch (o->tag) {
@@ -114,15 +114,12 @@ void gc_mark_and_copy(Obj *o) {
             {
                 Closure *c = o->data.cl;
                 if (c->gc_tag == NULL) {
-                    for (size_t i = 0; i < c->env_len; i++) {
-                        gc_mark_and_copy_cell(&c->env[i]);
-                    }
-                    size_t size = sizeof(Closure) + c->env_len * sizeof(Cell*);
-                    Closure *new = heap_alloc(alignof(Closure), size);
+                    gc_mark_and_copy_vect(&c->env);
+                    Closure *new = heap_alloc(alignof(Closure), sizeof(Closure));
                     if (new == NULL) {
                         DIE("out of memory");
                     }
-                    memcpy(new, c, size);
+                    *new = *c;
                     c->gc_tag = new;
                 }
                 o->data.cl = c->gc_tag;
@@ -162,23 +159,27 @@ void gc_mark_and_copy(Obj *o) {
             }
             break;
 
-        case tag_cell:
-            gc_mark_and_copy_cell(&o->data.ce);
+        case tag_vect:
+            gc_mark_and_copy_vect(&o->data.v);
             break;
     }
 }
 
-static void gc_mark_and_copy_cell(Cell **c) {
-    if ((*c)->gc_tag == NULL) {
-        gc_mark_and_copy(&(*c)->contents);
-        Cell *new = heap_alloc(alignof(Cell), sizeof(Cell));
+static void gc_mark_and_copy_vect(Vect **v) {
+    if ((*v)->gc_tag == NULL) {
+        size_t len = (*v)->len;
+        for (size_t i = 0; i < len; i++) {
+            gc_mark_and_copy(&(*v)->contents[i]);
+        }
+        size_t size = sizeof(Vect) + len * sizeof(Obj);
+        Vect *new = heap_alloc(alignof(Vect), size);
         if (new == NULL) {
             DIE("out of memory");
         }
-        *new = **c;
-        (*c)->gc_tag = new;
+        memcpy(new, *v, size);
+        (*v)->gc_tag = new;
     }
-    *c = (*c)->gc_tag;
+    *v = (*v)->gc_tag;
 }
 
 void gc_collect() {
@@ -283,41 +284,26 @@ Obj cons(Obj a, Obj b) {
     return a;
 }
 
-Obj make_ref(Obj a) {
-    Cell *c = try_heap_alloc(alignof(Cell), sizeof(Cell));
-
-    c->gc_tag = NULL;
-    c->contents = a;
-    a.tag = tag_cell;
-    a.data.ce = c;
-    return a;
-}
-
-Obj deref(Obj a) {
-    EXPECT(a, tag_cell);
-    return a.data.ce->contents;
-}
-
-static Obj do_counter(Cell *vars[]) {
+static Obj do_counter(Obj *vars) {
     UNSAFE_EXPECT_ARGS(0);
-    Obj a = vars[0]->contents;
-    vars[0]->contents.data.i++;
+    Obj a = vars[0];
+    vars[0].data.i++;
     return a;
 }
 
 Obj make_counter() {
-    // allocate a cell to store the counter
-    Cell *cnt = try_heap_alloc(alignof(Cell), sizeof(Cell));
-    cnt->gc_tag = NULL;
-    MAKE_INT(cnt->contents, 0);
+    // allocate a vector to store the counter
+    size_t vect_size = sizeof(Vect) + 1*sizeof(Obj);
+    Vect *v = try_heap_alloc(alignof(Vect), vect_size);
+    v->gc_tag = NULL;
+    v->len = 1;
+    MAKE_INT(v->contents[0], 0);
 
-    // allocate a closure with 1 variable pointing to the cell
-    size_t clo_size = sizeof(Closure) + sizeof(cnt);
-    Closure *clo = try_heap_alloc(alignof(Closure), clo_size);
+    // allocate a closure pointing to the vector
+    Closure *clo = try_heap_alloc(alignof(Closure), sizeof(Closure));
     clo->gc_tag = NULL;
     clo->run = do_counter;
-    clo->env_len = 1;
-    clo->env[0] = cnt;
+    clo->env = v;
 
     // return an object that points to the closure
     Obj a;
@@ -333,7 +319,7 @@ Obj call(Obj a) {
         case tag_proc:
             return a.data.p();
         case tag_closure:
-            return a.data.cl->run(a.data.cl->env);
+            return a.data.cl->run(a.data.cl->env->contents);
         default:
             EXPECT(a, tag_proc);
     }
@@ -392,8 +378,8 @@ void display(Obj a) {
             display_cons_items(*a.data.c);
             putchar(')');
             break;
-        case tag_cell:
-            fputs("#<cell>", stdout);
+        case tag_vect:
+            fputs("#<vector>", stdout);
             break;
     }
 }

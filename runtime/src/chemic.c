@@ -98,7 +98,9 @@ void gc_debug() {
     printf("* alive heap used: %zu\n", heap.len);
 }
 
-size_t gc_mark_and_copy(Obj *o) {
+static void gc_mark_and_copy_cell(Cell **c);
+
+void gc_mark_and_copy(Obj *o) {
     switch (o->tag) {
         case tag_nil:
         case tag_true:
@@ -106,6 +108,25 @@ size_t gc_mark_and_copy(Obj *o) {
         case tag_int:
         case tag_proc:
         case tag_str:
+            break;
+
+        case tag_closure:
+            {
+                Closure *c = o->data.cl;
+                if (c->gc_tag == NULL) {
+                    for (size_t i = 0; i < c->env_len; i++) {
+                        gc_mark_and_copy_cell(&c->env[i]);
+                    }
+                    size_t size = sizeof(Closure) + c->env_len * sizeof(Cell*);
+                    Closure *new = heap_alloc(alignof(Closure), size);
+                    if (new == NULL) {
+                        DIE("out of memory");
+                    }
+                    memcpy(new, c, size);
+                    c->gc_tag = new;
+                }
+                o->data.cl = c->gc_tag;
+            }
             break;
 
         case tag_heap_str:
@@ -142,21 +163,22 @@ size_t gc_mark_and_copy(Obj *o) {
             break;
 
         case tag_cell:
-            {
-                Cell *c = o->data.ce;
-                if (c->gc_tag == NULL) {
-                    gc_mark_and_copy(&c->contents);
-                    Cell *new = heap_alloc(alignof(Cell), sizeof(Cell));
-                    if (new == NULL) {
-                        DIE("out of memory");
-                    }
-                    *new = *c;
-                    c->gc_tag = new;
-                }
-                o->data.ce = c->gc_tag;
-            }
+            gc_mark_and_copy_cell(&o->data.ce);
             break;
     }
+}
+
+static void gc_mark_and_copy_cell(Cell **c) {
+    if ((*c)->gc_tag == NULL) {
+        gc_mark_and_copy(&(*c)->contents);
+        Cell *new = heap_alloc(alignof(Cell), sizeof(Cell));
+        if (new == NULL) {
+            DIE("out of memory");
+        }
+        *new = **c;
+        (*c)->gc_tag = new;
+    }
+    *c = (*c)->gc_tag;
 }
 
 void gc_collect() {
@@ -221,7 +243,7 @@ Obj less_than(Obj a, Obj b) {
     return a.data.i < b.data.i ? TRUE : FALSE;
 }
 
-Str *expect_str(Obj a) {
+static Str *expect_str(Obj a) {
     switch (a.tag) {
         case tag_str:
             return a.data.s;
@@ -276,11 +298,45 @@ Obj deref(Obj a) {
     return a.data.ce->contents;
 }
 
+static Obj do_counter(Cell *vars[]) {
+    UNSAFE_EXPECT_ARGS(0);
+    Obj a = vars[0]->contents;
+    vars[0]->contents.data.i++;
+    return a;
+}
+
+Obj make_counter() {
+    // allocate a cell to store the counter
+    Cell *cnt = try_heap_alloc(alignof(Cell), sizeof(Cell));
+    cnt->gc_tag = NULL;
+    MAKE_INT(cnt->contents, 0);
+
+    // allocate a closure with 1 variable pointing to the cell
+    size_t clo_size = sizeof(Closure) + sizeof(cnt);
+    Closure *clo = try_heap_alloc(alignof(Closure), clo_size);
+    clo->gc_tag = NULL;
+    clo->run = do_counter;
+    clo->env_len = 1;
+    clo->env[0] = cnt;
+
+    // return an object that points to the closure
+    Obj a;
+    a.tag = tag_closure;
+    a.data.cl = clo;
+    return a;
+}
+
 ArgVec call_args = { NULL, 0, 0 };
 
 Obj call(Obj a) {
-    EXPECT(a, tag_proc);
-    return a.data.p();
+    switch (a.tag) {
+        case tag_proc:
+            return a.data.p();
+        case tag_closure:
+            return a.data.cl->run(a.data.cl->env);
+        default:
+            EXPECT(a, tag_proc);
+    }
 }
 
 static void display_str(Str *s) {
@@ -321,6 +377,9 @@ void display(Obj a) {
             break;
         case tag_proc:
             fputs("#<procedure>", stdout);
+            break;
+        case tag_closure:
+            fputs("#<closure>", stdout);
             break;
         case tag_str:
             display_str(a.data.s);

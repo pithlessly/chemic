@@ -95,6 +95,10 @@ let all_ops =
     (make_unary ~proc_ident:"deref"
        (fun out a buf -> bprintf buf "%t=deref(%t);" out a))
 
+  |> StringMap.add "counter"
+    (make_nullary ~proc_ident:"counter"
+       (fun out buf -> bprintf buf "%t=make_counter();" out))
+
   |> StringMap.add "string-copy"
     (make_unary ~proc_ident:"string_copy"
        (fun out a buf -> bprintf buf "%t=string_copy(%t);" out a))

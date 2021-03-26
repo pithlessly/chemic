@@ -15,6 +15,7 @@ typedef enum {
     tag_false,
     tag_int,
     tag_proc,
+    tag_closure,
     tag_str,
     tag_heap_str,
     tag_cons,
@@ -29,12 +30,14 @@ typedef struct {
 typedef struct HeapStr_s HeapStr;
 typedef struct Cons_s Cons;
 typedef struct Cell_s Cell;
+typedef struct Closure_s Closure;
 
 typedef struct Obj_s {
     Tag tag;
     union {
         int64_t i;
         struct Obj_s (*p)();
+        Closure *cl;
         Str *s;
         HeapStr *hs;
         Cons *c;
@@ -58,6 +61,13 @@ struct Cell_s {
     Obj contents;
 };
 
+struct Closure_s {
+    Closure *gc_tag;
+    Obj (*run)(Cell**);
+    size_t env_len;
+    Cell *env[];
+};
+
 typedef struct {
     Obj *buf;
     size_t len;
@@ -77,6 +87,7 @@ inline static char const* classify(Tag t) {
         case tag_false:    return "boolean";
         case tag_int:      return "int";
         case tag_proc:     return "procedure";
+        case tag_closure:  return "closure"; // TODO merge with procedure
         case tag_str:
         case tag_heap_str: return "string";
         case tag_cons:     return "cons";
@@ -173,6 +184,7 @@ extern Obj string_copy(Obj a);
 extern Obj cons(Obj a, Obj b);
 extern Obj make_ref(Obj a);
 extern Obj deref(Obj a);
+extern Obj make_counter();
 extern Obj call(Obj a);
 extern void display(Obj a);
 

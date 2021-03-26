@@ -75,6 +75,11 @@ static Obj operator_deref() {
     return deref(call_args.buf[0]);
 }
 
+static Obj operator_counter() {
+    expect_args_exact(0);
+    return make_counter();
+}
+
 static Obj operator_string_copy() {
     expect_args_exact(1);
     return string_copy(call_args.buf[0]);

@@ -248,7 +248,7 @@ let write_local (local: Expr.local_data) =
 let write_proc (proc: Expr.proc_writers) =
   let local = write_local proc.local in
   fun buf ->
-    bprintf buf "static Obj %t() {\n" proc.name;
+    bprintf buf "static Obj %t(void) {\n" proc.name;
     bprintf buf "  UNSAFE_EXPECT_ARGS(%d);\n" proc.num_params;
     local buf;
     bprintf buf "  return r[REG];\n}\n"
@@ -257,7 +257,7 @@ let write_proc (proc: Expr.proc_writers) =
 let write_main (top_level: Expr.local_data) =
   let local = write_local top_level in
   fun buf ->
-    Buffer.add_string buf "int main() {\n";
+    Buffer.add_string buf "int main(void) {\n";
     Buffer.add_string buf "  initialize();\n";
     Buffer.add_string buf "  gc_push_roots(g,NUM_GLOBALS);\n";
     local buf;

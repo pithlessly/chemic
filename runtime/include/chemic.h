@@ -36,7 +36,7 @@ typedef struct Obj_s {
     Tag tag;
     union {
         int64_t i;
-        struct Obj_s (*p)();
+        struct Obj_s (*p)(void);
         Closure *cl;
         Str *s;
         HeapStr *hs;
@@ -189,18 +189,18 @@ extern Obj less_than(Obj a, Obj b);
 extern Obj len(Obj a);
 extern Obj string_copy(Obj a);
 extern Obj cons(Obj a, Obj b);
-extern Obj make_counter();
+extern Obj make_counter(void);
 extern Obj call(Obj a);
 extern void display(Obj a);
 
 extern Vect *alloc_vect(size_t len);
 
 extern void gc_push_roots(Obj *roots, size_t count);
-extern void gc_pop_roots();
-extern void gc_debug();
-extern void gc_collect();
+extern void gc_pop_roots(void);
+extern void gc_debug(void);
+extern void gc_collect(void);
 
-extern void initialize();
-extern void finalize();
+extern void initialize(void);
+extern void finalize(void);
 
 #endif /* CHEMIC_H */

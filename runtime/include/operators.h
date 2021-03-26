@@ -15,7 +15,7 @@ inline static size_t expect_args_min(size_t n) {
     return len;
 }
 
-static Obj operator_add() {
+static Obj operator_add(void) {
     Obj a;
     MAKE_INT(a, 0);
     for (size_t i = 0; i < call_args.len; i++) {
@@ -25,7 +25,7 @@ static Obj operator_add() {
     return a;
 }
 
-static Obj operator_sub() {
+static Obj operator_sub(void) {
     size_t len = expect_args_min(1);
     Obj a = call_args.buf[0];
     for (size_t i = 1; i < len; i++) {
@@ -34,7 +34,7 @@ static Obj operator_sub() {
     return len == 1 ? neg(a) : a;
 }
 
-static Obj operator_mul() {
+static Obj operator_mul(void) {
     Obj a;
     MAKE_INT(a, 1);
     for (size_t i = 0; i < call_args.len; i++) {
@@ -44,44 +44,44 @@ static Obj operator_mul() {
     return a;
 }
 
-static Obj operator_less_than() {
+static Obj operator_less_than(void) {
     expect_args_exact(2);
     return less_than(call_args.buf[0], call_args.buf[1]);
 }
 
-static Obj operator_len() {
+static Obj operator_len(void) {
     expect_args_exact(1);
     return len(call_args.buf[0]);
 }
 
-static Obj operator_display() {
+static Obj operator_display(void) {
     expect_args_exact(1);
     display(call_args.buf[0]);
     return call_args.buf[0];
 }
 
-static Obj operator_cons() {
+static Obj operator_cons(void) {
     expect_args_exact(2);
     return cons(call_args.buf[0], call_args.buf[1]);
 }
 
-static Obj operator_counter() {
+static Obj operator_counter(void) {
     expect_args_exact(0);
     return make_counter();
 }
 
-static Obj operator_string_copy() {
+static Obj operator_string_copy(void) {
     expect_args_exact(1);
     return string_copy(call_args.buf[0]);
 }
 
-static Obj operator_dbg() {
+static Obj operator_dbg(void) {
     expect_args_exact(0);
     gc_debug();
     return NIL;
 }
 
-static Obj operator_gc_collect() {
+static Obj operator_gc_collect(void) {
     expect_args_exact(0);
     gc_collect();
     return NIL;

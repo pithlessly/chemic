@@ -22,7 +22,7 @@ struct {
 
 #define INITIAL_HEAP_SIZE 2048
 
-void initialize() {
+void initialize(void) {
     unsigned char *alive = malloc(INITIAL_HEAP_SIZE);
     if (alive == NULL) {
         DIE("out of memory");
@@ -99,11 +99,11 @@ void gc_push_roots(Obj *roots, size_t count) {
     gc_stack.height++;
 }
 
-void gc_pop_roots() {
+void gc_pop_roots(void) {
     gc_stack.height--;
 }
 
-void gc_debug() {
+void gc_debug(void) {
     printf("\n* current stack height: %zu\n", gc_stack.height);
     printf("* alive heap size: %zu\n", heap.cap);
     printf("* alive heap used: %zu\n", heap.len);
@@ -193,7 +193,7 @@ static void gc_mark_and_copy_vect(Vect **v) {
     *v = (*v)->gc_tag;
 }
 
-void gc_collect() {
+void gc_collect(void) {
     // swap the alive and dead heap pointers
     {
         unsigned char *tmp = heap.alive;
@@ -302,7 +302,7 @@ static Obj do_counter(Obj *vars) {
     return a;
 }
 
-Obj make_counter() {
+Obj make_counter(void) {
     // allocate a vector to store the counter
     Vect *v = alloc_vect(1);
     MAKE_INT(v->contents[0], 0);
@@ -392,7 +392,7 @@ void display(Obj a) {
     }
 }
 
-void finalize() {
+void finalize(void) {
     free(call_args.buf);
     call_args.len = 0;
     call_args.cap = 0;

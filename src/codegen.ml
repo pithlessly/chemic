@@ -238,11 +238,11 @@ let write_local (local: Expr.local_data) =
     (* emit the function body contents *)
     List.iter (bprintf buf "\n  %t") body;
 
-    (* notify the GC to stop tracking `r` as roots *)
-    bprintf buf "\n  gc_pop_roots();\n";
     if do_alloc_e then
       (* notify the GC to stop tracking `e` as roots *)
-      bprintf buf "  gc_pop_roots();\n"
+      bprintf buf "  gc_pop_roots();\n";
+    (* notify the GC to stop tracking `r` as roots *)
+    bprintf buf "\n  gc_pop_roots();\n"
 
 (* Write a function implementing the body of a procedure *)
 let write_proc (proc: Expr.proc_writers) =

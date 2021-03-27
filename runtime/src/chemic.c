@@ -55,7 +55,9 @@ void *heap_alloc(size_t align, size_t len) {
     }
 }
 
-void *try_heap_alloc(size_t align, size_t len) {
+// Attempt to allocate space for an object on the heap, but perform a GC
+// cycle if there is no space remaining.
+void *retry_heap_alloc(size_t align, size_t len) {
     void *p = heap_alloc(align, len);
     if (!p) {
         gc_collect();
@@ -72,7 +74,7 @@ void *try_heap_alloc(size_t align, size_t len) {
 // whose contents are uninitialized. Can trigger GC.
 Vect *alloc_vect(size_t len) {
     size_t size = sizeof(Vect) + len * sizeof(Obj);
-    Vect *v = try_heap_alloc(alignof(Vect), size);
+    Vect *v = retry_heap_alloc(alignof(Vect), size);
     v->gc_tag = NULL;
     v->len = len;
     return v;
@@ -278,7 +280,7 @@ Obj len(Obj a) {
 
 Obj string_copy(Obj a) {
     Str *s = expect_str(a);
-    HeapStr *hs = try_heap_alloc(alignof(HeapStr), sizeof(HeapStr) + s->len);
+    HeapStr *hs = retry_heap_alloc(alignof(HeapStr), sizeof(HeapStr) + s->len);
 
     hs->gc_tag = NULL;
     memcpy(&hs->s, s, sizeof(Str) + s->len);
@@ -289,7 +291,7 @@ Obj string_copy(Obj a) {
 }
 
 Obj cons(Obj a, Obj b) {
-    Cons *c = try_heap_alloc(alignof(Cons), sizeof(Cons));
+    Cons *c = retry_heap_alloc(alignof(Cons), sizeof(Cons));
 
     c->gc_tag = NULL;
     c->car = a;
@@ -312,7 +314,7 @@ Obj make_counter(void) {
     MAKE_INT(v->contents[0], 0);
 
     // allocate a closure pointing to the vector
-    Closure *clo = try_heap_alloc(alignof(Closure), sizeof(Closure));
+    Closure *clo = retry_heap_alloc(alignof(Closure), sizeof(Closure));
     clo->gc_tag = NULL;
     clo->run = do_counter;
     clo->env = v;

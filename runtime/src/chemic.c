@@ -209,6 +209,10 @@ void gc_collect(void) {
             gc_mark_and_copy(&frame.roots[j]);
         }
     }
+    // mark and copy all function arguments
+    for (size_t i = 0; i < call_args.len; i++) {
+        gc_mark_and_copy(&call_args.buf[i]);
+    }
 }
 
 #define I64_MIN (~9223372036854775807)

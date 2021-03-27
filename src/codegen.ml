@@ -240,7 +240,7 @@ let write_local (local: Expr.local_data) =
 
     if do_alloc_e then
       (* notify the GC to stop tracking `e` as roots *)
-      bprintf buf "  gc_pop_roots();\n";
+      bprintf buf "\n  gc_pop_roots();";
     (* notify the GC to stop tracking `r` as roots *)
     bprintf buf "\n  gc_pop_roots();\n"
 

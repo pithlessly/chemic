@@ -14,8 +14,12 @@ val seq_iteri: (int -> 'a -> unit) -> 'a Seq.t -> unit
 (* create a sequence that returns repeated copies of a value *)
 val seq_replicate: int -> 'a -> 'a Seq.t
 
-(* return the first 'Some _' value returned by the function for an element in the list *)
-val search: ('a -> 'b option) -> 'a list -> 'b option
+(* return the first 'Some _' value returned by the function for an element in
+ * the list, along with its index *)
+val search: ('a -> 'b option) -> 'a list -> (int * 'b) option
 
 (* determine if a list is empty *)
 val null: 'a list -> bool
+
+(* modify only the first element of a list *)
+val map_hd: ('a -> 'a) -> 'a list -> 'a list

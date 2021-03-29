@@ -8,7 +8,7 @@ type global_var_id = int
 type local_var_id = int
 type var_id =
   | Global of global_var_id
-  | Local of local_var_id
+  | Local of { id: local_var_id; locality: int }
 
 type string_id = int
 type proc_id = int
@@ -82,14 +82,14 @@ let find_defined_vars forms =
 let build_with ~(gctx: global_ctx) =
   let rec go
       ~(lctx: local_ctx)
-      ~(local_scope: local_var_id StringMap.t)
+      ~(local_scopes: local_var_id StringMap.t list)
       ~(block_level: bool)
       ~(top_level: bool) =
     function
 
     | Ident name ->
-      (match StringMap.find_opt name local_scope with
-       | Some id -> Var (Local id)
+      (match Utils.search (StringMap.find_opt name) local_scopes with
+       | Some (locality, id) -> Var (Local { locality; id })
        | None ->
          match StringMap.find_opt name gctx.globals with
          | Some id -> Var (Global id)
@@ -105,10 +105,11 @@ let build_with ~(gctx: global_ctx) =
              raise (Invalid_argument (Printf.sprintf "undefined variable: %s" name)))
 
     | List [Ident "box"; Ident ident] ->
-      (match StringMap.find_opt ident local_scope with
-       | Some id ->
-         lctx |> make_local_boxed id;
-         Var (Local id)
+      (match Utils.search (StringMap.find_opt ident) local_scopes with
+       | Some (locality, id) ->
+         if locality = 0 then
+           lctx |> make_local_boxed id;
+         Var (Local { locality; id })
        | None ->
          raise (Invalid_argument "undefined variable"))
 
@@ -119,9 +120,10 @@ let build_with ~(gctx: global_ctx) =
         else if top_level then
           Global (StringMap.find ident gctx.globals)
         else
-          Local (StringMap.find ident local_scope)
+          let id = StringMap.find ident (List.hd local_scopes) in
+          Local { locality = 0; id }
       in
-      Define (id, go ~lctx ~local_scope ~block_level:false ~top_level expr)
+      Define (id, go ~lctx ~local_scopes ~block_level:false ~top_level expr)
 
     | List (Ident "let" ::
             List [List [Ident lhs; rhs]] ::
@@ -142,18 +144,20 @@ let build_with ~(gctx: global_ctx) =
       lctx |> add_local_var var_id `Internal;
       (* pass over the rhs expression using the original scoping rules *)
       let recurse_rhs =
-        go ~lctx ~local_scope ~block_level:false ~top_level
+        go ~lctx ~local_scopes ~block_level:false ~top_level
       in
       (* update the local scope with the variable being bound and the
        * variables that were (define)d; the latter take precedence *)
-      let local_scope =
-        local_scope
-        |> StringMap.add lhs var_id
-        |> StringMap.union (fun _ defined _ -> Some defined) define_scope
+      let local_scopes =
+        local_scopes |> Utils.map_hd (fun sc ->
+            sc
+            |> StringMap.add lhs var_id
+            |> StringMap.union (fun _ defined _ -> Some defined) define_scope
+          )
       in
       (* pass over the body using the new local scope *)
       let recurse_body =
-        go ~lctx ~local_scope ~block_level:true ~top_level
+        go ~lctx ~local_scopes ~block_level:true ~top_level
       in
       Let { lhs = var_id;
             rhs = recurse_rhs rhs;
@@ -188,7 +192,8 @@ let build_with ~(gctx: global_ctx) =
         |> StringMap.of_seq
       in
       let recurse =
-        go ~lctx ~local_scope ~block_level:true ~top_level:false
+        go ~lctx ~block_level:true ~top_level:false
+          ~local_scopes:(local_scope :: local_scopes)
       in
       let local = { lctx; body = List.map recurse body } in
       gctx.procs <- { num_params = List.length params;
@@ -198,7 +203,7 @@ let build_with ~(gctx: global_ctx) =
       Lambda id
 
     | List [Ident "if"; cond; true_case; false_case] ->
-      let recurse = go ~lctx ~local_scope ~block_level:false ~top_level in
+      let recurse = go ~lctx ~local_scopes ~block_level:false ~top_level in
       If { condition = recurse cond;
            true_case = recurse true_case;
            false_case = recurse false_case }
@@ -210,7 +215,7 @@ let build_with ~(gctx: global_ctx) =
         | _ -> None
       in
 
-      let recurse = go ~lctx ~local_scope ~block_level:false ~top_level in
+      let recurse = go ~lctx ~local_scopes ~block_level:false ~top_level in
 
       (match op with
        | None -> Call (recurse f, List.map recurse args)
@@ -240,7 +245,7 @@ let build_with ~(gctx: global_ctx) =
       body = forms |> List.map
                (go
                   ~lctx
-                  ~local_scope:StringMap.empty
+                  ~local_scopes:[StringMap.empty]
                   ~block_level:true
                   ~top_level:true) }
 

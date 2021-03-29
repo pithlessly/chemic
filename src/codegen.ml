@@ -77,7 +77,7 @@ let write_expr ~write_access_var ~rctx =
 
     | Let { lhs; rhs; body } ->
       let rhs = go ~reg rhs in
-      let var = write_access_var (Expr.Local lhs) in
+      let var = write_access_var (Expr.Local { locality = 0; id = lhs }) in
       let body = List.map (go ~reg) body in
       fun buf ->
         rhs buf;
@@ -183,12 +183,15 @@ let write_local (local: Expr.local_data) =
     (* convert an `Expr.var_id` to an lvalue *)
     let write_access_var = function
       | Expr.Global id -> fun buf -> bprintf buf "g[%d]" id
-      | Expr.Local id ->
-        match boxed_unboxed_idxs.(id) with
-        | `Boxed id ->
-          fun buf -> bprintf buf "ENV_LOCAL(e,%d)" id
-        | `Unboxed id ->
-          fun buf -> bprintf buf "r[%d]" id
+      | Expr.Local { locality; id } ->
+        if locality <> 0 then
+          raise (Invalid_argument "capturing from above scopes is not supported yet")
+        else
+          match boxed_unboxed_idxs.(id) with
+          | `Boxed id ->
+            fun buf -> bprintf buf "ENV_LOCAL(e,%d)" id
+          | `Unboxed id ->
+            fun buf -> bprintf buf "r[%d]" id
     in
     List.map (write_expr ~write_access_var ~rctx) local.body
   in

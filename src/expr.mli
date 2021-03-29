@@ -8,7 +8,13 @@ type local_var_id = int
 
 type var_id =
   | Global of global_var_id
-  | Local of local_var_id
+  | Local of {
+      (* what is the index of the variable within its local scope? *)
+      id: local_var_id;
+      (* how many layers of `(lambda)`s back do you have to look to
+       * find that scope? *)
+      locality: int;
+    }
 
 (* a token identifying a string literal *)
 type string_id

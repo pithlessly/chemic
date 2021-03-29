@@ -38,14 +38,20 @@ let seq_replicate n x =
       Seq.Nil
   in loop n
 
-let rec search f =
-  function
-  | [] -> None
-  | x :: xs ->
-    match f x with
-    | Some res -> Some res
-    | None -> search f xs
+let search f elems =
+  let rec loop i =
+    function
+    | [] -> None
+    | x :: xs ->
+      match f x with
+      | Some res -> Some (i, res)
+      | None -> loop (i + 1) xs
+  in loop 0 elems
 
 let null = function
   | [] -> true
   | _ -> false
+
+let map_hd f = function
+  | [] -> []
+  | x :: xs -> f x :: xs

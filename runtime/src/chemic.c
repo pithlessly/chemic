@@ -301,10 +301,10 @@ Obj cons(Obj a, Obj b) {
     return a;
 }
 
-static Obj do_counter(Obj *vars) {
+static Obj do_counter(Vect *vars) {
     UNSAFE_EXPECT_ARGS(0);
-    Obj a = vars[0];
-    vars[0].data.i++;
+    Obj a = vars->contents[0];
+    vars->contents[0].data.i++;
     return a;
 }
 
@@ -326,6 +326,18 @@ Obj make_counter(void) {
     return a;
 }
 
+Obj make_closure(ClosureFn f, Vect *env) {
+    Closure *clo = retry_heap_alloc(alignof(Closure), sizeof(Closure));
+    clo->gc_tag = NULL;
+    clo->run = f;
+    clo->env = env;
+
+    Obj a;
+    a.tag = tag_closure;
+    a.data.cl = clo;
+    return a;
+}
+
 ArgVec call_args = { NULL, 0, 0 };
 
 Obj call(Obj a) {
@@ -333,7 +345,7 @@ Obj call(Obj a) {
         case tag_proc:
             return a.data.p();
         case tag_closure:
-            return a.data.cl->run(a.data.cl->env->contents);
+            return a.data.cl->run(a.data.cl->env);
         default:
             EXPECT(a, tag_proc);
     }

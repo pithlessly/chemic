@@ -45,7 +45,7 @@ end
 (* Return a Writer.t that emits a sequence of statements which have the
  * effect of evaluating the given expression and assigning the return value
  * to the given register. *)
-let write_expr ~write_access_var ~rctx =
+let write_expr ~(global: Expr.global_writers) ~write_access_var ~rctx =
   let rec go ~reg = function
     | Int i -> fun buf ->
       bprintf buf "MAKE_INT(%t,%Ld);" (Register.write reg) i
@@ -77,19 +77,25 @@ let write_expr ~write_access_var ~rctx =
 
     | Let { lhs; rhs; body } ->
       let rhs = go ~reg rhs in
-      let var = write_access_var (Expr.Local { locality = 0; id = lhs }) in
+      let var = write_access_var (Expr.Local lhs) in
       let body = List.map (go ~reg) body in
       fun buf ->
         rhs buf;
         bprintf buf "%t=%t;" var (Register.write reg);
         if Utils.null body then
           raise (Invalid_argument "let block is empty");
-        body |> List.iter (bprintf buf "%t");
-        bprintf buf "MAKE_NIL(%t);" var
+        body |> List.iter (bprintf buf "%t")
 
     | Lambda id ->
-      let proc = Expr.write_access_proc id in
-      fun buf -> bprintf buf "MAKE_PROC(%t,%t);" (Register.write reg) proc
+      let proc = global.procs.(Expr.int_of_proc_id id) in
+      fun buf ->
+        bprintf buf
+          (if proc.is_closure || proc.local.fwd_env then
+             "%t=make_closure(&%t,e);"
+           else
+             "MAKE_PROC(%t,&%t);")
+          (Register.write reg)
+          proc.name
 
     | If { condition; true_case; false_case } ->
       let condition = go ~reg condition in
@@ -159,23 +165,8 @@ let write_expr ~write_access_var ~rctx =
 
 (* Write the content of a function body which is common to both
  * procedures and the top level *)
-let write_local (local: Expr.local_data) =
-  (* create separate sequences of incrementing IDs for boxed
-   * and unboxed variables *)
-  let num_boxed = ref 0 in
-  let num_unboxed = ref 0 in
-  let boxed_unboxed_idxs: [`Boxed of int | `Unboxed of int] array =
-    local.locals |> Array.map (fun (var: Expr.var_metadata) ->
-        if var.boxed then
-          let id = !num_boxed in
-          num_boxed := id + 1;
-          `Boxed id
-        else
-          let id = !num_unboxed in
-          num_unboxed := id + 1;
-          `Unboxed id
-      )
-  in
+let write_local ~(global: Expr.global_writers) (local: Expr.local_data) =
+  let fwd_env_offset = if local.fwd_env then 1 else 0 in
 
   (* generate writers for every expr in the function body *)
   let rctx = Register.init () in
@@ -183,48 +174,66 @@ let write_local (local: Expr.local_data) =
     (* convert an `Expr.var_id` to an lvalue *)
     let write_access_var = function
       | Expr.Global id -> fun buf -> bprintf buf "g[%d]" id
-      | Expr.Local { locality; id } ->
-        if locality <> 0 then
-          raise (Invalid_argument "capturing from above scopes is not supported yet")
+      | Expr.Local id ->
+        let meta = local.locals.(id) in
+        if meta.boxed then
+          fun buf -> bprintf buf "ENV_LOCAL(e,%d)" (id + fwd_env_offset)
         else
-          match boxed_unboxed_idxs.(id) with
-          | `Boxed id ->
-            fun buf -> bprintf buf "ENV_LOCAL(e,%d)" id
-          | `Unboxed id ->
-            fun buf -> bprintf buf "r[%d]" id
+          fun buf -> bprintf buf "r[%d]" id
+      | Expr.Nonlocal { distance; proc_id; id } ->
+        let proc =
+          match Expr.int_of_proc_id proc_id with
+          | -1 -> global.main
+          | n -> global.procs.(n).local
+        in
+        let pos = proc.locals.(id).pos in
+        let lval = fun buf ->
+          for _ = 0 to distance - 1 do
+            Buffer.add_string buf "CLOSURE_PARENT("
+          done;
+          Buffer.add_char buf 'c';
+          for _ = 0 to distance - 1 do
+            Buffer.add_char buf ')'
+          done
+        in
+        let fwd_env_offset = if proc.fwd_env then 1 else 0 in
+        fun buf ->
+          bprintf buf "ENV_LOCAL(%t,%d)" lval (pos + fwd_env_offset)
     in
-    List.map (write_expr ~write_access_var ~rctx) local.body
+    List.map (write_expr ~global ~write_access_var ~rctx) local.body
   in
 
   (* the `r` array will hold all unboxed variables, followed
    * by temporaries needed for expression evaluation *)
   let num_temps = Register.allocated rctx in
-  let num_registers = !num_unboxed + num_temps in
+  let num_registers = local.num_unboxed + num_temps in
 
-  (* the `e` array will hold all boxed variables *)
-  let do_alloc_e = !num_boxed > 0 in
+  (* the `e` array will hold all boxed variables, preceded by a `vect`
+   * value pointing to the parent environment if necessary *)
+  let env_size = local.num_boxed + fwd_env_offset in
+  let do_alloc_e = env_size > 0 in
 
   fun buf ->
     bprintf buf "  Obj r[%d];" num_registers;
     if do_alloc_e then
       (* note that this can heap allocate and trigger GC *)
-      bprintf buf "ENV_INIT(e,%d);" !num_boxed;
+      (bprintf buf "ENV_INIT(e,%d);" env_size;
+       if local.fwd_env then
+         Buffer.add_string buf "ENV_FWD(e,c);");
 
     (* offset into the register array where temporaries begin *)
-    bprintf buf "const size_t REG=%d;\n  " !num_unboxed;
+    bprintf buf "const size_t REG=%d;\n  " local.num_unboxed;
 
     (* emit initialization of local variables to their correct values *)
-    local.locals |> Array.iteri (fun i (meta: Expr.var_metadata) ->
+    local.locals |> Array.iter (fun (meta: Expr.var_metadata) ->
         let init_expr =
           match meta.source with
           | `Param -> "UNSAFE_NEXT_ARG"
           | `Internal -> "NIL"
         in
-        match boxed_unboxed_idxs.(i) with
-        | `Boxed id ->
-          bprintf buf "ENV_LOCAL(e,%d)=%s;" id init_expr
-        | `Unboxed id ->
-          bprintf buf "r[%d]=%s;" id init_expr
+        bprintf buf
+          (if meta.boxed then "ENV_LOCAL(e,%d)=%s;" else "r[%d]=%s;")
+          (meta.pos + fwd_env_offset) init_expr
       );
 
     (* emit initialization of temporaries to nil *)
@@ -236,7 +245,7 @@ let write_local (local: Expr.local_data) =
     bprintf buf "\n  gc_push_roots(r,%d);" num_registers;
     if do_alloc_e then
       (* notify the GC to track `e` *)
-      bprintf buf "\n  gc_push_roots(ENV_ROOTS(e),%d);" !num_boxed;
+      bprintf buf "\n  gc_push_roots(ENV_ROOTS(e),%d);" local.num_boxed;
 
     (* emit the function body contents *)
     List.iter (bprintf buf "\n  %t") body;
@@ -247,18 +256,29 @@ let write_local (local: Expr.local_data) =
     (* notify the GC to stop tracking `r` as roots *)
     bprintf buf "\n  gc_pop_roots();\n"
 
+let write_proc_sig (proc: Expr.proc_writers) buf =
+  bprintf buf "static Obj %t(%s);\n" proc.name
+    (if proc.is_closure || proc.local.fwd_env then
+       "Vect *c"
+     else
+       "void")
+
 (* Write a function implementing the body of a procedure *)
-let write_proc (proc: Expr.proc_writers) =
-  let local = write_local proc.local in
+let write_proc ~global (proc: Expr.proc_writers) =
+  let local = write_local ~global proc.local in
   fun buf ->
-    bprintf buf "static Obj %t(void) {\n" proc.name;
+    bprintf buf "static Obj %t(%s) {\n" proc.name
+      (if proc.is_closure || proc.local.fwd_env then
+         "Vect *c"
+       else
+         "void");
     bprintf buf "  UNSAFE_EXPECT_ARGS(%d);\n" proc.num_params;
     local buf;
     bprintf buf "  return r[REG];\n}\n"
 
 (* Write main(), implementing the top-level procedure *)
-let write_main (top_level: Expr.local_data) =
-  let local = write_local top_level in
+let write_main ~(global: Expr.global_writers) =
+  let local = write_local ~global global.main in
   fun buf ->
     Buffer.add_string buf "int main(void) {\n";
     Buffer.add_string buf "  initialize();\n";
@@ -271,14 +291,15 @@ let write_main (top_level: Expr.local_data) =
 
 (* Convert a syntax tree into a C program that evaluates each
  * top-level expression. *)
-let gen_code (expr_data: Expr.global_writers) =
-  let main = write_main expr_data.main in
+let gen_code (global: Expr.global_writers) =
+  let main = write_main ~global in
 
   let buf = Buffer.create 2048 in
   Buffer.add_string buf "#include \"chemic.h\"\n";
   Buffer.add_string buf "#include \"operators.h\"\n";
-  expr_data.decls buf;
-  expr_data.procs |> List.iter (fun proc -> write_proc proc buf);
+  global.decls buf;
+  global.procs |> Array.iter (fun proc -> write_proc_sig proc buf);
+  global.procs |> Array.iter (fun proc -> write_proc ~global proc buf);
   main buf;
 
   Buffer.contents buf

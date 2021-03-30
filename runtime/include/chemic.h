@@ -62,9 +62,10 @@ struct Vect_s {
     Obj contents[];
 };
 
+typedef Obj (*ClosureFn)(Vect*);
 struct Closure_s {
     Closure *gc_tag;
-    Obj (*run)(Obj*);
+    ClosureFn run;
     Vect *env;
 };
 
@@ -142,11 +143,20 @@ inline static char const* classify(Tag t) {
 #define ENV_INIT(VAR, N) \
     Vect *VAR = alloc_vect(N)
 
+#define ENV_FWD(ENV, C) \
+    if (1) { \
+        ENV_LOCAL(ENV, 0).tag = tag_vect; \
+        ENV_LOCAL(ENV, 0).data.v = (C); \
+    } else (void) 0
+
 #define ENV_LOCAL(ENV, I) \
     ((ENV)->contents[I])
 
 #define ENV_ROOTS(ENV) \
     ((ENV)->contents)
+
+#define CLOSURE_PARENT(C) \
+    (ENV_LOCAL(C,0).data.v)
 
 /* inline */ static void arg_init(size_t n) {
     call_args.len = 0;
@@ -190,6 +200,7 @@ extern Obj len(Obj a);
 extern Obj string_copy(Obj a);
 extern Obj cons(Obj a, Obj b);
 extern Obj make_counter(void);
+extern Obj make_closure(ClosureFn f, Vect *env);
 extern Obj call(Obj a);
 extern void display(Obj a);
 

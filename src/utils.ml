@@ -5,6 +5,13 @@ let unfold f init =
     | None, acc -> (List.rev xs, acc)
   in loop init []
 
+let rec iter_max f n =
+  function
+  | x :: xs when n > 0 ->
+    f x;
+    iter_max f (n - 1) xs
+  | _ -> ()
+
 let unzip_with f =
   let rec loop lef rig =
     function

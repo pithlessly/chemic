@@ -4,14 +4,16 @@ type form = Parse.form =
   | Ident of string
   | List of form list
 
+type string_id = int
+type proc_id = int
+let int_of_proc_id i = i
+
 type global_var_id = int
 type local_var_id = int
 type var_id =
   | Global of global_var_id
-  | Local of { id: local_var_id; locality: int }
-
-type string_id = int
-type proc_id = int
+  | Local of local_var_id
+  | Nonlocal of { distance: int; proc_id: proc_id; id: local_var_id }
 
 type expr =
   | Int of int64
@@ -30,27 +32,35 @@ module IntMap = Map.Make(Int)
 
 type var_metadata = {
   source: [`Param | `Internal];
+  pos: int;
   boxed: bool;
 }
 
 type local_ctx = {
   mutable vars: var_metadata IntMap.t;
+  (* does this procedure contain variables captured by inner lambdas? *)
+  mutable is_closure: bool;
+  (* are variables from enclosing procedures captured by inner lambdas? *)
+  mutable fwd_env: bool;
 }
 
-let add_local_var id source lctx =
-  lctx.vars <- IntMap.add id { source; boxed = false } lctx.vars
+let new_local_var source lctx =
+  let id = IntMap.cardinal lctx.vars in
+  lctx.vars <- IntMap.add id { source; pos = 0; boxed = false } lctx.vars;
+  id
 
 let make_local_boxed id lctx =
   let metadata = IntMap.find id lctx.vars in
   lctx.vars <- IntMap.add id { metadata with boxed = true } lctx.vars
 
-type local = {
+type local_intermediate = {
   lctx: local_ctx;
-  body: expr list;
+  (* this needs to be mutable for reasons that will be elaborated on later *)
+  mutable body: expr list;
 }
 
-type proc = {
-  local: local;
+type proc_intermediate = {
+  local: local_intermediate;
   num_params: int;
 }
 
@@ -59,7 +69,7 @@ type global_ctx = {
   (* should be the same as 'List.length string_literals' *)
   mutable num_strings: int;
 
-  mutable procs: proc list;
+  mutable procs: proc_intermediate list;
   (* should be the same as 'List.length procs' *)
   mutable num_procs: int;
 
@@ -79,39 +89,55 @@ let find_defined_vars forms =
            Some i)
       | _ -> None)
 
-let build_with ~(gctx: global_ctx) =
+type local_var_layer = {
+  ctx: local_ctx;
+  (* we use -1 to represent main unfortunately *)
+  id: proc_id;
+  scope: local_var_id StringMap.t;
+}
+
+let build_with ~(gctx: global_ctx): form list -> local_intermediate =
   let rec go
-      ~(lctx: local_ctx)
-      ~(local_scopes: local_var_id StringMap.t list)
+      ~(local: local_var_layer)
+      ~(nonlocal: local_var_layer list)
       ~(block_level: bool)
       ~(top_level: bool) =
     function
 
     | Ident name ->
-      (match Utils.search (StringMap.find_opt name) local_scopes with
-       | Some (locality, id) -> Var (Local { locality; id })
+      (match StringMap.find_opt name local.scope with
+       | Some id -> Var (Local id)
        | None ->
-         match StringMap.find_opt name gctx.globals with
-         | Some id -> Var (Global id)
-         | None ->
-           match Operator.lookup name with
-           | Some op -> OperatorArg op
-           | None ->
-             (* If an undefined variable is referenced in the global scope, we
-              * throw an error. Note that many Scheme implementations allow global
-              * variables to be defined using 'set!', which would make this error
-              * incorrect. However, such usage of 'set!' is not standard-compliant,
-              * so we don't have to support it. *)
-             raise (Invalid_argument (Printf.sprintf "undefined variable: %s" name)))
+         (* if a variable name is found in an enclosing scope, mark it as boxed and mark
+          * the current procedure as a closure *)
+         let do_search layer =
+           match StringMap.find_opt name layer.scope with
+           | None -> None
+           | Some id ->
+             layer.ctx |> make_local_boxed id;
+             Some (layer.id, id)
+         in
 
-    | List [Ident "box"; Ident ident] ->
-      (match Utils.search (StringMap.find_opt ident) local_scopes with
-       | Some (locality, id) ->
-         if locality = 0 then
-           lctx |> make_local_boxed id;
-         Var (Local { locality; id })
-       | None ->
-         raise (Invalid_argument "undefined variable"))
+         match Utils.search do_search nonlocal with
+         | Some (idx, (proc_id, id)) ->
+           local.ctx.is_closure <- true;
+           nonlocal |> Utils.iter_max
+             (fun local -> local.ctx.fwd_env <- true) idx;
+           Var (Nonlocal { distance = idx; proc_id; id })
+
+         | None ->
+           match StringMap.find_opt name gctx.globals with
+           | Some id -> Var (Global id)
+           | None ->
+             match Operator.lookup name with
+             | Some op -> OperatorArg op
+             | None ->
+               (* If an undefined variable is referenced in the global scope, we
+                * throw an error. Note that many Scheme implementations allow global
+                * variables to be defined using 'set!', which would make this error
+                * incorrect. However, such usage of 'set!' is not standard-compliant,
+                * so we don't have to support it. *)
+               raise (Invalid_argument (Printf.sprintf "undefined variable: %s" name)))
 
     | List [Ident "define"; Ident ident; expr] ->
       let id =
@@ -120,46 +146,41 @@ let build_with ~(gctx: global_ctx) =
         else if top_level then
           Global (StringMap.find ident gctx.globals)
         else
-          let id = StringMap.find ident (List.hd local_scopes) in
-          Local { locality = 0; id }
+          Local (StringMap.find ident local.scope)
       in
-      Define (id, go ~lctx ~local_scopes ~block_level:false ~top_level expr)
+      Define (id, go ~local ~nonlocal ~block_level:false ~top_level expr)
 
     | List (Ident "let" ::
             List [List [Ident lhs; rhs]] ::
             body) ->
-      (* generate IDs for variables (define)d by the body and add them to lctx *)
-      let id_offset = IntMap.cardinal lctx.vars in
+      (* add the variables (define)d by the body into the local state and
+       * create a scope map based on their IDs *)
       let define_scope =
         find_defined_vars body
-        |> Utils.seq_mapi (fun i var ->
-            let id = id_offset + i in
-            lctx |> add_local_var id `Internal;
-            (var, id)
-          )
+        |> Seq.map (fun var ->
+            let id = local.ctx |> new_local_var `Internal in
+            (var, id))
         |> StringMap.of_seq
       in
-      (* generate an ID for the variable being bound and add it to lctx *)
-      let var_id = id_offset + StringMap.cardinal define_scope in
-      lctx |> add_local_var var_id `Internal;
       (* pass over the rhs expression using the original scoping rules *)
       let recurse_rhs =
-        go ~lctx ~local_scopes ~block_level:false ~top_level
+        go ~local ~nonlocal ~block_level:false ~top_level
       in
+      (* add the variable being bound into the local state *)
+      let lhs_id = local.ctx |> new_local_var `Internal in
       (* update the local scope with the variable being bound and the
        * variables that were (define)d; the latter take precedence *)
-      let local_scopes =
-        local_scopes |> Utils.map_hd (fun sc ->
-            sc
-            |> StringMap.add lhs var_id
-            |> StringMap.union (fun _ defined _ -> Some defined) define_scope
-          )
+      let new_scope =
+        StringMap.union (fun _ defined _ -> Some defined)
+          define_scope
+          (StringMap.add lhs lhs_id local.scope)
       in
       (* pass over the body using the new local scope *)
       let recurse_body =
-        go ~lctx ~local_scopes ~block_level:true ~top_level
+        go ~nonlocal ~block_level:true ~top_level
+          ~local:{local with scope = new_scope}
       in
-      Let { lhs = var_id;
+      Let { lhs = lhs_id;
             rhs = recurse_rhs rhs;
             body = List.map recurse_body body }
 
@@ -167,9 +188,26 @@ let build_with ~(gctx: global_ctx) =
       if Utils.null body then
         raise (Invalid_argument "lambda body cannot be empty");
 
-      let lctx = { vars = IntMap.empty } in
+      let lctx = {
+        vars = IntMap.empty;
+        is_closure = false;
+        fwd_env = false } in
 
-      (* get sequences of two kinds of local variables and their sources *)
+      (* Add a dummy procedure to `gctx` with an empty body -
+       * the reason it is necessary to do this beforehand is so
+       * that we can give the procudure a stable ID, which other
+       * enclosed procudures can use to refer to it. Once we are
+       * done traversing the lambda body, we can mutate `body`
+       * in `local_intermediate` with the result (and `lctx` is
+       * also mutated in the process. *)
+      let local_interm = { lctx; body = [] } in
+      gctx.procs <- { local = local_interm;
+                      num_params = List.length params } :: gctx.procs;
+      let id = gctx.num_procs in
+      gctx.num_procs <- id + 1;
+
+      (* get sequences of two kinds of local variables and their sources:
+       * those which are parameters, and those (define)d *)
       let param_vars =
         List.to_seq params
         |> Seq.map (function
@@ -182,28 +220,29 @@ let build_with ~(gctx: global_ctx) =
       in
 
       (* construct the initial scope containing those variables *)
-      let local_scope =
-        Seq.append param_vars defined_vars
-        |> Utils.seq_mapi (fun i (var, source) ->
-            let id = i in
-            lctx |> add_local_var id source;
-            (var, id)
-          )
-        |> StringMap.of_seq
+      let new_layer = {
+        scope =
+          Seq.append param_vars defined_vars
+          |> Seq.map (fun (var, source) ->
+              let id = lctx |> new_local_var source in
+              (var, id)
+            )
+          |> StringMap.of_seq;
+        ctx = lctx;
+        id }
       in
+
+      (* traverse the lambda body *)
       let recurse =
-        go ~lctx ~block_level:true ~top_level:false
-          ~local_scopes:(local_scope :: local_scopes)
+        go ~block_level:true ~top_level:false
+          ~local:new_layer ~nonlocal:(local :: nonlocal)
       in
-      let local = { lctx; body = List.map recurse body } in
-      gctx.procs <- { num_params = List.length params;
-                      local } :: gctx.procs;
-      let id = gctx.num_procs in
-      gctx.num_procs <- id + 1;
+
+      local_interm.body <- List.map recurse body;
       Lambda id
 
     | List [Ident "if"; cond; true_case; false_case] ->
-      let recurse = go ~lctx ~local_scopes ~block_level:false ~top_level in
+      let recurse = go ~local ~nonlocal ~block_level:false ~top_level in
       If { condition = recurse cond;
            true_case = recurse true_case;
            false_case = recurse false_case }
@@ -215,7 +254,7 @@ let build_with ~(gctx: global_ctx) =
         | _ -> None
       in
 
-      let recurse = go ~lctx ~local_scopes ~block_level:false ~top_level in
+      let recurse = go ~local ~nonlocal ~block_level:false ~top_level in
 
       (match op with
        | None -> Call (recurse f, List.map recurse args)
@@ -235,7 +274,11 @@ let build_with ~(gctx: global_ctx) =
 
   in
   fun forms ->
-    let lctx = { vars = IntMap.empty } in
+    let lctx = {
+      vars = IntMap.empty;
+      is_closure = false;
+      fwd_env = false } in
+    (* treat all `(define)`d variables at the top level as globals *)
     find_defined_vars forms
     |> Utils.seq_iteri (fun i var ->
         let id = i in
@@ -244,8 +287,8 @@ let build_with ~(gctx: global_ctx) =
     { lctx;
       body = forms |> List.map
                (go
-                  ~lctx
-                  ~local_scopes:[StringMap.empty]
+                  ~local:{ ctx = lctx; scope = StringMap.empty; id = -1 }
+                  ~nonlocal:[]
                   ~block_level:true
                   ~top_level:true) }
 
@@ -253,25 +296,41 @@ let bprintf = Printf.bprintf
 
 type local_data = {
   locals: var_metadata array;
+  num_boxed: int;
+  num_unboxed: int;
   body: expr list;
+  fwd_env: bool;
 }
 
 let write_local { lctx; body } =
-  { locals =
-      IntMap.to_seq lctx.vars
-      |> Seq.map snd
-      |> Array.of_seq;
+  let num_boxed = ref 0 in
+  let num_unboxed = ref 0 in
+  let locals =
+    IntMap.to_seq lctx.vars
+    |> Seq.map (fun (_, metadata) ->
+        let r = if metadata.boxed then num_boxed else num_unboxed in
+        let pos = !r in
+        r := pos + 1;
+        { metadata with pos }
+      )
+    |> Array.of_seq
+  in
+  { locals;
+    num_boxed = !num_boxed;
+    num_unboxed = !num_unboxed;
+    fwd_env = lctx.fwd_env;
     body }
 
 type proc_writers = {
   name: Writer.t;
   num_params: int;
   local: local_data;
+  is_closure: bool;
 }
 
 type global_writers = {
   decls: Writer.t;
-  procs: proc_writers list;
+  procs: proc_writers array;
   main: local_data;
   after_main: Writer.t;
 }
@@ -332,10 +391,13 @@ let build forms =
 
     procs =
       List.rev gctx.procs
-      |> List.mapi (fun i (proc: proc) ->
+      |> List.to_seq
+      |> Utils.seq_mapi (fun i (proc: proc_intermediate) ->
           { name = (fun buf -> bprintf buf "PROC%d" i);
             num_params = proc.num_params;
-            local = write_local proc.local });
+            local = write_local proc.local;
+            is_closure = proc.local.lctx.is_closure })
+      |> Array.of_seq;
 
     main = write_local main;
 
@@ -344,6 +406,3 @@ let build forms =
 
 let write_access_string id =
   fun buf -> bprintf buf "&STR%d" id
-
-let write_access_proc id =
-  fun buf -> bprintf buf "&PROC%d" id

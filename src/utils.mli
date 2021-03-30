@@ -2,6 +2,9 @@
  * returns the final state and a list of all intermediate values *)
 val unfold: ('a -> 'b option * 'a) -> 'a -> 'b list * 'a
 
+(* Like `List.iter`, but only visit a limited number of elements *)
+val iter_max: ('a -> unit) -> int -> 'a list -> unit
+
 (* Creates two lists out of the elements returned by the function *)
 val unzip_with: ('a -> 'b * 'c) -> 'a list -> 'b list * 'c list
 

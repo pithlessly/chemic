@@ -1,6 +1,12 @@
 (* Functionality for translating parsed forms into ASTs and collecting other
  * information into symbol tables, etc. in the process. *)
 
+(* a token identifying a string literal *)
+type string_id
+(* a token identifying a procedure literal *)
+type proc_id
+val int_of_proc_id: proc_id -> int
+
 (* a token identifying a global variable *)
 type global_var_id = int
 (* a token identifying a local variable *)
@@ -8,18 +14,14 @@ type local_var_id = int
 
 type var_id =
   | Global of global_var_id
-  | Local of {
-      (* what is the index of the variable within its local scope? *)
+  | Local of local_var_id
+  | Nonlocal of {
+      (* how many layers of `(lambda)`s back do you have to look
+       * to find this variable, starting from the enclosing one? *)
+      distance: int;
+      proc_id: proc_id;
       id: local_var_id;
-      (* how many layers of `(lambda)`s back do you have to look to
-       * find that scope? *)
-      locality: int;
     }
-
-(* a token identifying a string literal *)
-type string_id
-(* a token identifying a procedure literal *)
-type proc_id
 
 type expr =
   | Int of int64
@@ -35,6 +37,9 @@ type expr =
 
 type var_metadata = {
   source: [`Param | `Internal];
+  (* how many variables of the same source have
+   * come before this in the array already? *)
+  pos: int;
   boxed: bool;
 }
 
@@ -42,8 +47,11 @@ type var_metadata = {
 type local_data = {
   (* metadata about each local variable *)
   locals: var_metadata array;
+  num_boxed: int;
+  num_unboxed: int;
   (* the body of the procedure *)
   body: expr list;
+  fwd_env: bool;
 }
 
 (* writer data needed for procedures *)
@@ -53,13 +61,14 @@ type proc_writers = {
   (* the number of parameters that the procedure takes *)
   num_params: int;
   local: local_data;
+  is_closure: bool;
 }
 
 type global_writers = {
   (* declarations to be placed before main() *)
   decls: Writer.t;
   (* information needed to define procedures *)
-  procs: proc_writers list;
+  procs: proc_writers array;
   (* information needed in main() *)
   main: local_data;
   (* additional statements to be placed at the end of main() *)
@@ -69,4 +78,3 @@ type global_writers = {
 val build: Parse.form list -> global_writers
 
 val write_access_string: string_id -> Writer.t
-val write_access_proc: proc_id -> Writer.t

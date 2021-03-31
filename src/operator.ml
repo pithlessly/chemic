@@ -39,6 +39,21 @@ let make_binary ~proc_ident (impl: Writer.t -> Writer.t -> Writer.t -> Writer.t)
       | [a; b] -> impl out a b buf
       | _ -> impossible () }
 
+let cons_accessors_of_length n =
+  Utils.seq_range (1 lsl n)
+  |> Seq.map (fun pos ->
+      let s = String.init n (fun bit ->
+          "ad".[(pos lsr bit) land 1]) in
+      let name = "c" ^ s ^ "r" in
+      (name, make_unary ~proc_ident:name
+         (fun _ a buf ->
+            for i = 1 to n do
+              let bit = n - i in
+              bprintf buf "%t=c%cr(%t);" a s.[bit] a
+            done
+         ))
+    )
+
 let all_ops =
   StringMap.empty
 
@@ -74,6 +89,18 @@ let all_ops =
   |> StringMap.add "<"
     (make_binary ~proc_ident:"less_than"
        (fun out a b buf -> bprintf buf "%t=less_than(%t,%t);" out a b))
+
+  |> StringMap.add_seq (cons_accessors_of_length 1) (* car, cdr *)
+  |> StringMap.add_seq (cons_accessors_of_length 2) (* caar, cddr, etc *)
+  |> StringMap.add_seq (cons_accessors_of_length 3) (* caaar, cdddr, etc *)
+  |> StringMap.add_seq (cons_accessors_of_length 4) (* caaaar, cddddr, etc *)
+
+  |> StringMap.add "set-car!"
+    (make_binary ~proc_ident:"set_car"
+       (fun out a b buf -> bprintf buf "%t=set_car(%t,%t);" out a b))
+  |> StringMap.add "set-cdr!"
+    (make_binary ~proc_ident:"set_cdr"
+       (fun out a b buf -> bprintf buf "%t=set_cdr(%t,%t);" out a b))
 
   |> StringMap.add "len"
     (make_unary ~proc_ident:"len"

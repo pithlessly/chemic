@@ -189,6 +189,30 @@ inline static void arg_push(Obj a) {
 #define UNSAFE_NEXT_ARG \
     call_args.buf[arg_i++]
 
+inline static Obj car(Obj a) {
+    EXPECT(a, tag_cons);
+    return a.data.c->car;
+}
+
+inline static Obj cdr(Obj a) {
+    EXPECT(a, tag_cons);
+    return a.data.c->cdr;
+}
+
+inline static Obj set_car(Obj a, Obj b) {
+    EXPECT(a, tag_cons);
+    a.data.c->car = b;
+    MAKE_NIL(a);
+    return a;
+}
+
+inline static Obj set_cdr(Obj a, Obj b) {
+    EXPECT(a, tag_cons);
+    a.data.c->cdr = b;
+    MAKE_NIL(a);
+    return a;
+}
+
 /*= external functions =*/
 
 extern Obj add(Obj a, Obj b);

@@ -44,15 +44,39 @@ static Obj operator_mul(void) {
     return a;
 }
 
-static Obj operator_less_than(void) {
-    expect_args_exact(2);
-    return less_than(call_args.buf[0], call_args.buf[1]);
-}
+#define MAKE_UNARY_OP1(NAME, F) \
+    static Obj operator_##NAME (void) { \
+        expect_args_exact(1); \
+        return F(call_args.buf[0]); \
+    }
 
-static Obj operator_len(void) {
-    expect_args_exact(1);
-    return len(call_args.buf[0]);
-}
+#define MAKE_UNARY_OP2(NAME, F1, F2) \
+    static Obj operator_##NAME (void) { \
+        expect_args_exact(1); \
+        return F1(F2(call_args.buf[0])); \
+    }
+
+#define MAKE_UNARY_OP3(NAME, F1, F2, F3) \
+    static Obj operator_##NAME (void) { \
+        expect_args_exact(1); \
+        return F1(F2(F3(call_args.buf[0]))); \
+    }
+
+#define MAKE_UNARY_OP4(NAME, F1, F2, F3, F4) \
+    static Obj operator_##NAME (void) { \
+        expect_args_exact(1); \
+        return F1(F2(F3(F4(call_args.buf[0])))); \
+    }
+
+#define MAKE_BINARY_OP1(NAME, F) \
+    static Obj operator_##NAME (void) { \
+        expect_args_exact(2); \
+        return F(call_args.buf[0], call_args.buf[1]); \
+    }
+
+MAKE_BINARY_OP1(less_than, less_than);
+
+MAKE_UNARY_OP1(len, len);
 
 static Obj operator_display(void) {
     expect_args_exact(1);
@@ -60,20 +84,48 @@ static Obj operator_display(void) {
     return call_args.buf[0];
 }
 
-static Obj operator_cons(void) {
-    expect_args_exact(2);
-    return cons(call_args.buf[0], call_args.buf[1]);
-}
+MAKE_BINARY_OP1(cons, cons);
+
+MAKE_UNARY_OP1(car, car);
+MAKE_UNARY_OP1(cdr, cdr);
+
+MAKE_UNARY_OP2(caar, car, car);
+MAKE_UNARY_OP2(cadr, car, cdr);
+MAKE_UNARY_OP2(cdar, cdr, car);
+MAKE_UNARY_OP2(cddr, cdr, cdr);
+
+MAKE_UNARY_OP3(caaar, car, car, car);
+MAKE_UNARY_OP3(caadr, car, car, cdr);
+MAKE_UNARY_OP3(cadar, car, cdr, car);
+MAKE_UNARY_OP3(caddr, car, cdr, cdr);
+MAKE_UNARY_OP3(cdaar, cdr, car, car);
+MAKE_UNARY_OP3(cdadr, cdr, car, cdr);
+MAKE_UNARY_OP3(cddar, cdr, cdr, car);
+MAKE_UNARY_OP3(cdddr, cdr, cdr, cdr);
+
+MAKE_UNARY_OP4(caaaar, car, car, car, car);
+MAKE_UNARY_OP4(caaadr, car, car, car, cdr);
+MAKE_UNARY_OP4(caadar, car, car, cdr, car);
+MAKE_UNARY_OP4(caaddr, car, car, cdr, cdr);
+MAKE_UNARY_OP4(cadaar, car, cdr, car, car);
+MAKE_UNARY_OP4(cadadr, car, cdr, car, cdr);
+MAKE_UNARY_OP4(caddar, car, cdr, cdr, car);
+MAKE_UNARY_OP4(cadddr, car, cdr, cdr, cdr);
+MAKE_UNARY_OP4(cdaaar, cdr, car, car, car);
+MAKE_UNARY_OP4(cdaadr, cdr, car, car, cdr);
+MAKE_UNARY_OP4(cdadar, cdr, car, cdr, car);
+MAKE_UNARY_OP4(cdaddr, cdr, car, cdr, cdr);
+MAKE_UNARY_OP4(cddaar, cdr, cdr, car, car);
+MAKE_UNARY_OP4(cddadr, cdr, cdr, car, cdr);
+MAKE_UNARY_OP4(cdddar, cdr, cdr, cdr, car);
+MAKE_UNARY_OP4(cddddr, cdr, cdr, cdr, cdr);
 
 static Obj operator_counter(void) {
     expect_args_exact(0);
     return make_counter();
 }
 
-static Obj operator_string_copy(void) {
-    expect_args_exact(1);
-    return string_copy(call_args.buf[0]);
-}
+MAKE_UNARY_OP1(string_copy, string_copy);
 
 static Obj operator_dbg(void) {
     expect_args_exact(0);

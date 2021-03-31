@@ -8,6 +8,9 @@ val iter_max: ('a -> unit) -> int -> 'a list -> unit
 (* Creates two lists out of the elements returned by the function *)
 val unzip_with: ('a -> 'b * 'c) -> 'a list -> 'b list * 'c list
 
+(* create a sequence of the first `n` non-negative integers *)
+val seq_range: int -> int Seq.t
+
 (* map a function over a sequence with access to the index *)
 val seq_mapi: (int -> 'a -> 'b) -> 'a Seq.t -> 'b Seq.t
 

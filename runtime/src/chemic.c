@@ -269,6 +269,7 @@ static Str *expect_str(Obj a) {
             return &a.data.hs->s;
         default:
             EXPECT(a, tag_str);
+            return NULL;
     }
 }
 
@@ -348,6 +349,7 @@ Obj call(Obj a) {
             return a.data.cl->run(a.data.cl->env);
         default:
             EXPECT(a, tag_proc);
+            return NIL;
     }
 }
 

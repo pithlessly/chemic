@@ -1,2 +1,6 @@
 /_build
 .merlin
+tests/chemic.o
+tests/out.c
+tests/out.o
+tests/a.out

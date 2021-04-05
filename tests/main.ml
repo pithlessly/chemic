@@ -97,22 +97,21 @@ let try_do_test state =
           raise (Test_err ("expected runtime error, got different runtime error", Some error));
         if not (String.equal expect_output output) then
           raise (Test_err ("unexpected output", Some output)))
-  );
-  { state with code = [];
-               stdout = [];
-               expect = `Ok;
-               idx = state.idx + 1 }
+  )
 
 let do_test state =
   Printf.printf "%s #%d... %!" state.category (state.idx + 1);
-  try
-    let state' = try_do_test state in
-    print_endline "passed";
-    state'
-  with Test_err (msg, long_msg) ->
-    Printf.printf "failed (%s)\n" msg;
-    Option.iter print_endline long_msg;
-    state
+  (try
+     try_do_test state;
+     print_endline "ok"
+   with Test_err (msg, long_msg) ->
+     Printf.printf "failed (%s)\n" msg;
+     Option.iter print_endline long_msg);
+  { state with
+    code = [];
+    stdout = [];
+    expect = `Ok;
+    idx = state.idx + 1 }
 
 let handle_line state s =
   let state = { state with line_no = state.line_no + 1 } in

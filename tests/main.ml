@@ -1,3 +1,5 @@
+let filter = Sys.getenv_opt "CHEMIC_TEST_FILTER" |> Option.map Str.regexp
+
 let input_line_opt ch =
   try Some (input_line ch)
   with End_of_file -> None
@@ -100,13 +102,22 @@ let try_do_test state =
   )
 
 let do_test state =
-  Printf.printf "%s #%d... %!" state.category (state.idx + 1);
-  (try
-     try_do_test state;
-     print_endline "ok"
-   with Test_err (msg, long_msg) ->
-     Printf.printf "failed (%s)\n" msg;
-     Option.iter print_endline long_msg);
+  let desc = Printf.sprintf "%s #%d" state.category (state.idx + 1) in
+  let do_skip =
+    match filter with
+    | None -> false
+    | Some regex ->
+      try ignore (Str.search_forward regex desc 0); false
+      with Not_found -> true
+  in
+  if not do_skip then
+    (Printf.printf "%s... %!" desc;
+     try
+       try_do_test state;
+       print_endline "ok"
+     with Test_err (msg, long_msg) ->
+       Printf.printf "failed (%s)\n" msg;
+       Option.iter print_endline long_msg);
   { state with
     code = [];
     stdout = [];
@@ -127,17 +138,23 @@ let handle_line state s =
        | _ -> do_test state)
 
   | Some s ->
+    let directive c s =
+      let len = String.length s in
+      if len = 0 || s.[0] <> c then None else
+        let start = (if len > 1 && s.[1] = ' ' then 2 else 1) in
+        Some (String.sub s start (len - start))
+    in
     (* the `>` directive indicates code *)
-    match String.remove_prefix "> " s with
+    match directive '>' s with
     | Some content -> { state with code = content :: state.code }
     | None ->
       (* the `=` directive indicates a line of stdout *)
-      match String.remove_prefix "= " s with
+      match directive '=' s with
       | Some content -> { state with stdout = content :: state.stdout }
       | None ->
         (* the `!` directive indicates the result *)
         let expect =
-          match String.remove_prefix "! " s with
+          match directive '!' s with
           | Some "compile error" -> `CompileErr
           | Some msg -> `RuntimeErr msg
           | None -> raise (Syntax_err "unknown directive")

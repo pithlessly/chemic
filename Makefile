@@ -8,7 +8,7 @@ test_file := tests/test.md
 
 .PHONY: test
 test: $(ocaml_exec) $(runtime) tests/main.ml tests/tests.md
-	cd tests && ocaml unix.cma main.ml tests.md
+	cd tests && ocaml str.cma unix.cma main.ml tests.md
 
 $(runtime): runtime/src/chemic.c runtime/include/chemic.h
 	cc -fsanitize=undefined -Iruntime/include $< -c -o $@

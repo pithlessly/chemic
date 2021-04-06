@@ -76,7 +76,9 @@ static Obj operator_mul(void) {
 
 MAKE_BINARY_OP1(less_than, less_than);
 
+MAKE_UNARY_OP1(string_q, string_q);
 MAKE_UNARY_OP1(string_length, string_length);
+MAKE_UNARY_OP1(string_copy, string_copy);
 
 static Obj operator_display(void) {
     expect_args_exact(1);
@@ -124,8 +126,6 @@ static Obj operator_counter(void) {
     expect_args_exact(0);
     return make_counter();
 }
-
-MAKE_UNARY_OP1(string_copy, string_copy);
 
 static Obj operator_dbg(void) {
     expect_args_exact(0);

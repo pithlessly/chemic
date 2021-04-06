@@ -220,6 +220,7 @@ extern Obj sub(Obj a, Obj b);
 extern Obj neg(Obj a);
 extern Obj mul(Obj a, Obj b);
 extern Obj less_than(Obj a, Obj b);
+extern Obj string_q(Obj a);
 extern Obj string_length(Obj a);
 extern Obj string_copy(Obj a);
 extern Obj cons(Obj a, Obj b);

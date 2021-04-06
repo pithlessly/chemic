@@ -273,6 +273,16 @@ static Str *expect_str(Obj a) {
     }
 }
 
+Obj string_q(Obj a) {
+    switch (a.tag) {
+        case tag_str:
+        case tag_heap_str:
+            return TRUE;
+        default:
+            return FALSE;
+    }
+}
+
 Obj string_length(Obj a) {
     size_t len = expect_str(a)->len;
     MAKE_INT(a, len);

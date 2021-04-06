@@ -102,6 +102,10 @@ let all_ops =
     (make_binary ~proc_ident:"set_cdr"
        (fun out a b buf -> bprintf buf "%t=set_cdr(%t,%t);" out a b))
 
+  |> StringMap.add "string?"
+    (make_unary ~proc_ident:"string_q"
+       (fun out a buf -> bprintf buf "%t=string_q(%t);" out a))
+
   |> StringMap.add "string-length"
     (make_unary ~proc_ident:"string_length"
        (fun out a buf -> bprintf buf "%t=string_length(%t);" out a))

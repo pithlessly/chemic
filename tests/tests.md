@@ -59,6 +59,12 @@ Operators fail if any intermediate computation overflows:
 
 ## Strings
 
+    > (display (string? 0))
+    > (display (string? string?))
+    > (display (string? "abcd"))
+    > (display (string? (string-copy "abcd")))
+    = #f#f#t#t
+
     > (display "abcd")
     = abcd
 

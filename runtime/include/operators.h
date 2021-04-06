@@ -76,7 +76,7 @@ static Obj operator_mul(void) {
 
 MAKE_BINARY_OP1(less_than, less_than);
 
-MAKE_UNARY_OP1(len, len);
+MAKE_UNARY_OP1(string_length, string_length);
 
 static Obj operator_display(void) {
     expect_args_exact(1);

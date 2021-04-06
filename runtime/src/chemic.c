@@ -273,7 +273,7 @@ static Str *expect_str(Obj a) {
     }
 }
 
-Obj len(Obj a) {
+Obj string_length(Obj a) {
     size_t len = expect_str(a)->len;
     MAKE_INT(a, len);
     return a;

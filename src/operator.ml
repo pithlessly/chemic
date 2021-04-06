@@ -102,9 +102,13 @@ let all_ops =
     (make_binary ~proc_ident:"set_cdr"
        (fun out a b buf -> bprintf buf "%t=set_cdr(%t,%t);" out a b))
 
-  |> StringMap.add "len"
-    (make_unary ~proc_ident:"len"
-       (fun out a buf -> bprintf buf "%t=len(%t);" out a))
+  |> StringMap.add "string-length"
+    (make_unary ~proc_ident:"string_length"
+       (fun out a buf -> bprintf buf "%t=string_length(%t);" out a))
+
+  |> StringMap.add "string-copy"
+    (make_unary ~proc_ident:"string_copy"
+       (fun out a buf -> bprintf buf "%t=string_copy(%t);" out a))
 
   |> StringMap.add "display"
     (make_unary ~proc_ident:"display"
@@ -117,10 +121,6 @@ let all_ops =
   |> StringMap.add "counter"
     (make_nullary ~proc_ident:"counter"
        (fun out buf -> bprintf buf "%t=make_counter();" out))
-
-  |> StringMap.add "string-copy"
-    (make_unary ~proc_ident:"string_copy"
-       (fun out a buf -> bprintf buf "%t=string_copy(%t);" out a))
 
   |> StringMap.add "dbg"
     (make_nullary_nil ~proc_ident:"dbg" "gc_debug();")

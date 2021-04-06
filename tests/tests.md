@@ -57,6 +57,15 @@ Operators fail if any intermediate computation overflows:
     > (- (- (- 9223372036854775807) 1))
     ! fatal error: negate underflow
 
+## Strings
+
+    > (display "abcd")
+    = abcd
+
+    > (display (string-length "abcd"))
+    > (display (string-length ""))
+    = 40
+
 ## Syntax
 
 An empty program does nothing:

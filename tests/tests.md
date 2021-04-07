@@ -12,6 +12,152 @@ in this file has a description string `Arithmetic #1`.  If the environment
 variable `CHEMIC_TEST_FILTER` is set, it will be interpreted as a regular
 expression which tests will only be run if their description strings match.
 
+## Syntax
+
+An empty program does nothing:
+
+    >
+    =
+
+Numeric literals are supported:
+
+    > (display 5)
+    = 5
+
+Numeric literals cannot be larger than an `i64`:
+
+    > 9223372036854775807
+    =
+
+    > 9223372036854775808
+    ! compile error
+
+Identifiers can contain weird characters:
+
+    > (define !$%&*/:<=>?^_~+-.@ "test")
+    > (display !$%&*/:<=>?^_~+-.@)
+    = test
+
+Identifiers can have leading digits:
+
+    > (define 0_0 0)
+
+## Scope rules
+
+This is one of the areas I had the most trouble with getting right. The spec
+isn't entirely clear in some cases, and many of the implementations I've tested
+differ in their behavior. The main reason for this is that, as a dynamic,
+impure functional scripting language, a number of requirements are imposed on
+Scheme which end up coming into tension with each other:
+
+- It needs to permit side-effects at the top level. This means the order of
+  top-level statements is potentially meaningful.
+
+- It needs to facilitate recursive procedures. This means earlier functions
+  need to be able to refer to later ones.
+
+- It needs to permit global variables to be redefined. This is useful because
+  everything in the standard library is dropped into scope by default, so it
+  would be bad for additions to the standard library (e.g.
+  implementation-specific functions) to break existing programs.
+
+Haskell has only the second requirement. OCaml supports the first and the third
+by default (only adjacent functions can be mutually recursive, and only using
+the opt-in `and` keyword). Scheme needs to support all three, and that makes
+things a bit awkward.
+
+So accessing an undefined variable is illegal:
+
+    > (display x)
+    ! compile error
+
+Accessing variables before they are defined syntactically is legal:
+
+    > (define f (lambda () x))
+    > (define x 10)
+    > (display (f))
+    = 10
+
+    > (display (let ((_ 0))
+    >            (define f (lambda () x))
+    >            (define x 10)
+    >            (f)))
+    = 10
+
+Accessing variables before they are defined at runtime is also legal (they are
+initialized to nil):
+
+    > (let ((a 0))
+    >   (display b)
+    >   (define b a))
+    = ()
+
+    > (define nil nil)
+    > (display nil)
+    = ()
+
+`(define)` can only be used at the block level, but when its return value
+is accessible, it is nil:
+
+    > (display (define x 5))
+    ! compile error
+
+    > (let ((a (let ((b 0))
+    >            (define _ _))))
+    >   (display a))
+    = ()
+
+Initializing undefined variables to `nil` is only done for performance. Other
+implementations initialize it to some special "uninitialized" singleton, or
+just produce an error (but this compiling in a branch every time a global
+variable is accessed).
+
+Re-`(define)`ing a global variable at the top level overwrites it rather than
+defining a new one:
+
+    > (define x 0)
+    > (define f (lambda () (display x)))
+    > (f)
+    > (define x 1)
+    > (f)
+    = 01
+
+On the other hand, re-`(define)`ing a builtin procedure creates an entirely new
+variable:
+
+    > (define f (lambda () (display +)))
+    > (f)
+    > (define + 1)
+    > (f)
+    = ()1
+
+Variables are always looked up in their most recent scope:
+
+    > (define x 0)
+    > (let ((x (+ 1 x)))
+    >   (let ((x (+ 1 x)))
+    >     (let ((x (+ 1 x)))
+    >       (let ((x (+ 1 x)))
+    >         (display x)
+    >         (let ((x (+ 1 x)))
+    >           (let ((x (+ 1 x)))
+    >             (let ((x (+ 1 x)))
+    >               (display x))))))))
+    = 47
+
+Variables defined by `(define)` take precedence over function parameters
+and those defined by the RHS of a `(let)`:
+
+    > ((lambda (x)
+    >    (display x)
+    >    (define x 0)) 0)
+    = ()
+
+    > (let ((x 0))
+    >   (display x)
+    >   (define x 0))
+    = ()
+
 ## Arithmetic
 
 They function correctly:
@@ -59,45 +205,25 @@ Operators fail if any intermediate computation overflows:
 
 ## Strings
 
+String literals and heap-allocated strings both count:
+
     > (display (string? 0))
     > (display (string? string?))
     > (display (string? "abcd"))
     > (display (string? (string-copy "abcd")))
     = #f#f#t#t
 
+Strings are displayed without surrounding quotes:
+
     > (display "abcd")
     = abcd
+
+    > (display "a\nb")
+    = a
+    = b
+
+Other operators:
 
     > (display (string-length "abcd"))
     > (display (string-length ""))
     = 40
-
-## Syntax
-
-An empty program does nothing:
-
-    >
-    =
-
-Numeric literals are supported:
-
-    > (display 5)
-    = 5
-
-Numeric literals cannot be larger than an `i64`:
-
-    > 9223372036854775807
-    =
-
-    > 9223372036854775808
-    ! compile error
-
-Identifiers can contain weird characters:
-
-    > (define !$%&*/:<=>?^_~+-.@ "test")
-    > (display !$%&*/:<=>?^_~+-.@)
-    = test
-
-Identifiers can have leading digits:
-
-    > (define 0_0 0)

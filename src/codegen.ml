@@ -177,9 +177,9 @@ let write_local ~(global: Expr.global_writers) (local: Expr.local_data) =
       | Expr.Local id ->
         let meta = local.locals.(id) in
         if meta.boxed then
-          fun buf -> bprintf buf "ENV_LOCAL(e,%d)" (id + fwd_env_offset)
+          fun buf -> bprintf buf "ENV_LOCAL(e,%d)" (meta.pos + fwd_env_offset)
         else
-          fun buf -> bprintf buf "r[%d]" id
+          fun buf -> bprintf buf "r[%d]" meta.pos
       | Expr.Nonlocal { distance; proc_id; id } ->
         let proc =
           match Expr.int_of_proc_id proc_id with

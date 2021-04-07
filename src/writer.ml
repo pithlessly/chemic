@@ -21,7 +21,11 @@ let c_string s buf =
           Buffer.add_char buf '\\';
         Buffer.add_char buf c
       ) else
-        Printf.bprintf buf "\\x%02x" (Char.code c);
+        (* Previously we used hex escapes, but this would cause us to generate
+         * strings like "\x0ab", which is invalid because C allows hex escapes
+         * to be more than 2 characters for some reason. Instead, we use octal
+         * escapes, which are guaranteed to be a maximum of 3 characters. *)
+        Printf.bprintf buf "\\%03o" (Char.code c);
       loop (n + 1)
     )
   in

@@ -164,7 +164,7 @@ let build_with ~(gctx: global_ctx): form list -> local_intermediate =
       in
       (* pass over the rhs expression using the original scoping rules *)
       let recurse_rhs =
-        go ~local ~nonlocal ~block_level:false ~top_level
+        go ~local ~nonlocal ~block_level:false ~top_level:false
       in
       (* add the variable being bound into the local state *)
       let lhs_id = local.ctx |> new_local_var `Internal in
@@ -177,7 +177,7 @@ let build_with ~(gctx: global_ctx): form list -> local_intermediate =
       in
       (* pass over the body using the new local scope *)
       let recurse_body =
-        go ~nonlocal ~block_level:true ~top_level
+        go ~nonlocal ~block_level:true ~top_level:false
           ~local:{local with scope = new_scope}
       in
       Let { lhs = lhs_id;

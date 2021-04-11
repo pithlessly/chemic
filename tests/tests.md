@@ -160,7 +160,7 @@ and those defined by the RHS of a `(let)`:
 
 ## Arithmetic
 
-They function correctly:
+Arithmetic operators function correctly:
 
     > (display (+ 3 5))
     = 8
@@ -227,3 +227,56 @@ Other operators:
     > (display (string-length "abcd"))
     > (display (string-length ""))
     = 40
+
+## Cons cells
+
+Cons cells can be constructed using `(cons)`:
+
+    > (display (cons 1 2))
+    = (1 . 2)
+
+    > (define nil nil)
+    > (display (cons 1 nil))
+    = (1)
+
+    > (define nil nil)
+    > (display (cons 1 (cons 2 (cons 3 "()"))))
+    > (display (cons 1 (cons 2 (cons 3 nil))))
+    = (1 2 3 . ())(1 2 3)
+
+Components of cons cells can be accessed using `car`, `cdr`, and their 2-, 3-,
+and 4-compositions:
+
+    > (define d display)
+    > (define n "\n")
+    > (define c (cons (cons (cons (cons "a" "b")
+    >                             (cons "c" "d"))
+    >                       (cons (cons "e" "f")
+    >                             (cons "g" "h")))
+    >                 (cons (cons (cons "i" "j")
+    >                             (cons "k" "l"))
+    >                       (cons (cons "m" "n")
+    >                             (cons "o" "p")))))
+    > (d c)
+    > (d n)
+    >
+    > (d (car c)) (d (cdr c))
+    > (d n)
+    >
+    > (d (caar c)) (d (cdar c)) (d (cadr c)) (d (cddr c))
+    > (d n)
+    >
+    > (d (caaar c)) (d (cdaar c)) (d (cadar c)) (d (cddar c))
+    > (d (caadr c)) (d (cdadr c)) (d (caddr c)) (d (cdddr c))
+    > (d n)
+    >
+    > (d (caaaar c)) (d (cdaaar c)) (d (cadaar c)) (d (cddaar c))
+    > (d (caadar c)) (d (cdadar c)) (d (caddar c)) (d (cdddar c))
+    > (d (caaadr c)) (d (cdaadr c)) (d (cadadr c)) (d (cddadr c))
+    > (d (caaddr c)) (d (cdaddr c)) (d (cadddr c)) (d (cddddr c))
+    >
+    = ((((a . b) c . d) (e . f) g . h) ((i . j) k . l) (m . n) o . p)
+    = (((a . b) c . d) (e . f) g . h)(((i . j) k . l) (m . n) o . p)
+    = ((a . b) c . d)((e . f) g . h)((i . j) k . l)((m . n) o . p)
+    = (a . b)(c . d)(e . f)(g . h)(i . j)(k . l)(m . n)(o . p)
+    = abcdefghijklmnop

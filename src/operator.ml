@@ -1,135 +1,185 @@
 module StringMap = Map.Make(String)
 let bprintf = Printf.bprintf
-let impossible () = raise (Invalid_argument "impossible")
+let impossible () = invalid_arg "impossible"
+
+type t = int
 
 type num_args =
   | Exactly of int
   | AtLeast of int
 
-type t = {
-  args: num_args;
-  proc_ident: string;
-  impl: args: (Writer.t list) -> out: Writer.t -> Writer.t;
-}
+type static_impl = { args: num_args; impl: args: (Writer.t list) -> out: Writer.t -> Writer.t }
+type dynamic_impl = { args: num_args; name: Writer.t; body: Writer.t }
 
-let make_nullary ~proc_ident (impl: Writer.t -> Writer.t) =
-  { args = Exactly 0;
-    proc_ident;
-    impl = fun ~args ~out buf ->
-      match args with
-      | [] -> impl out buf
-      | _ -> impossible () }
+type dynamic_impl_cache = bool array
 
-let make_nullary_nil ~proc_ident (impl: string) =
-  make_nullary ~proc_ident (fun out buf -> bprintf buf "MAKE_NIL(%t);%s" out impl)
+let (bindings, (all_ops: (static_impl * dynamic_impl) array), num_ops) =
+  let bindings = ref StringMap.empty in
+  let all_ops = ref [] in
+  let n = ref 0 in
 
-let make_unary ~proc_ident (impl: Writer.t -> Writer.t -> Writer.t) =
-  { args = Exactly 1;
-    proc_ident;
-    impl = fun ~args ~out buf ->
-      match args with
-      | [a] -> impl out a buf
-      | _ -> impossible () }
+  let add_op ~name ?(ident = name) ~args ~static ~dynamic () =
+    let body = fun buf -> dynamic |> List.iter (bprintf buf "  %s\n") in
+    let static = { args; impl = static } in
+    let dynamic = { args; name = (fun buf -> bprintf buf "dynop_%s" ident); body } in
+    all_ops := (static, dynamic) :: !all_ops;
+    bindings := StringMap.add name !n !bindings;
+    n := !n + 1
+  in
 
-let make_binary ~proc_ident (impl: Writer.t -> Writer.t -> Writer.t -> Writer.t) =
-  { args = Exactly 2;
-    proc_ident;
-    impl = fun ~args ~out buf ->
-      match args with
-      | [a; b] -> impl out a b buf
-      | _ -> impossible () }
+  let add_action ~name ?(ident = name) ~body () =
+    add_op ~name ~ident ~args:(Exactly 0)
+      ~static: (fun ~args:_ ~out ->
+          fun buf -> bprintf buf "%sMAKE_NIL(%t);" body out)
+      ~dynamic: [body; "return NIL;"]
+      ()
+  in
 
-let cons_accessors_of_length n =
-  Utils.seq_range (1 lsl n)
-  |> Seq.map (fun pos ->
-      let s = String.init n (fun bit ->
-          "ad".[(pos lsr bit) land 1]) in
-      let name = "c" ^ s ^ "r" in
-      (name, make_unary ~proc_ident:name
-         (fun _ a buf ->
-            for i = 1 to n do
-              let bit = n - i in
-              bprintf buf "%t=c%cr(%t);" a s.[bit] a
-            done
-         ))
-    )
+  let add_unary_op ~name ?(ident = name) ~fn () =
+    add_op ~name ~ident ~args:(Exactly 1)
+      ~static: (fun [@warning "-8"] ~args:[a] ~out ->
+          fun buf -> bprintf buf "%t=%s(%t);" out fn a)
+      ~dynamic: [Printf.sprintf "return %s(C_ARG(0));" fn]
+      ()
+  in
 
-let all_ops =
-  StringMap.empty
+  let add_binary_op ~name ?(ident = name) ~fn () =
+    add_op ~name ~ident ~args:(Exactly 2)
+      ~static: (fun [@warning "-8"] ~args:[a; b] ~out ->
+          fun buf -> bprintf buf "%t=%s(%t,%t);" out fn a b)
+      ~dynamic: [Printf.sprintf "return %s(C_ARG(0),C_ARG(1));" fn]
+      ()
+  in
 
-  |> StringMap.add "+"
-    { args = AtLeast 0;
-      proc_ident = "add";
-      impl = fun ~args ~out buf ->
+  add_binary_op ~name:"<" ~ident:"less_than" ~fn:"less_than" ();
+
+  add_op ~name:"+" ~ident:"add" ~args:(AtLeast 0)
+    ~static: (fun ~args ~out ->
         match args with
-        | [] -> bprintf buf "MAKE_INT(%t,0);" out
+        | [] -> fun buf -> bprintf buf "MAKE_INT(%t,0);" out
+        | [_] -> fun buf -> bprintf buf "EXPECT(%t,tag_int);" out
         | _ :: rhss ->
-          List.iter (bprintf buf "%t=add(%t,%t);" out out) rhss }
+          fun buf ->
+            List.iter (bprintf buf "%t=add(%t,%t);" out out) rhss)
+    ~dynamic: [
+      "Obj a;";
+      "MAKE_INT(a, 0);";
+      "for (size_t i = 0; i < var_args; i++)";
+      "  a = add(a, C_ARG(i));";
+      "return a;";
+    ] ();
 
-  |> StringMap.add "-"
-    { args = AtLeast 1;
-      proc_ident = "sub";
-      impl = fun ~args ~out buf ->
+  add_op ~name:"*" ~ident:"mul" ~args:(AtLeast 0)
+    ~static: (fun ~args ~out ->
+        match args with
+        | [] -> fun buf -> bprintf buf "MAKE_INT(%t,1);" out
+        | [_] -> fun buf -> bprintf buf "EXPECT(%t,tag_int);" out
+        | _ :: rhss ->
+          fun buf ->
+            List.iter (bprintf buf "%t=mul(%t,%t);" out out) rhss)
+    ~dynamic: [
+      "Obj a;";
+      "MAKE_INT(a, 1);";
+      "for (size_t i = 0; i < var_args; i++)";
+      "  a = mul(a, C_ARG(i));";
+      "return a;";
+    ] ();
+
+  add_op ~name:"-" ~ident:"sub" ~args:(AtLeast 1)
+    ~static: (fun ~args ~out ->
         match args with
         | [] -> impossible ()
-        | [x] -> bprintf buf "%t=neg(%t);" out x
+        | [a] -> fun buf -> bprintf buf "%t=neg(%t);" out a
         | _ :: rhss ->
-          List.iter (bprintf buf "%t=sub(%t,%t);" out out) rhss }
+          fun buf ->
+            List.iter (bprintf buf "%t=sub(%t,%t);" out out) rhss)
+    ~dynamic: [
+      "Obj a = C_ARG(0);";
+      "for (size_t i = 1; i < var_args; i++)";
+      "  a = sub(a, C_ARG(i));";
+      "return var_args == 1 ? neg(a) : a;";
+    ] ();
 
-  |> StringMap.add "*"
-    { args = AtLeast 0;
-      proc_ident = "mul";
-      impl = fun ~args ~out buf ->
-        match args with
-        | [] -> bprintf buf "MAKE_INT(%t,1);" out
-        | _ :: rhss ->
-          List.iter (bprintf buf "%t=mul(%t,%t);" out out) rhss }
+  add_binary_op ~name:"cons" ~fn:"cons" ();
 
-  (* TODO: support multiple arguments *)
-  |> StringMap.add "<"
-    (make_binary ~proc_ident:"less_than"
-       (fun out a b buf -> bprintf buf "%t=less_than(%t,%t);" out a b))
+  add_unary_op ~name:"car" ~fn:"car" ();
+  add_unary_op ~name:"cdr" ~fn:"cdr" ();
 
-  |> StringMap.add_seq (cons_accessors_of_length 1) (* car, cdr *)
-  |> StringMap.add_seq (cons_accessors_of_length 2) (* caar, cddr, etc *)
-  |> StringMap.add_seq (cons_accessors_of_length 3) (* caaar, cdddr, etc *)
-  |> StringMap.add_seq (cons_accessors_of_length 4) (* caaaar, cddddr, etc *)
+  add_binary_op ~name:"set-car!" ~ident:"set_car" ~fn:"set_car" ();
+  add_binary_op ~name:"set-cdr!" ~ident:"set_cdr" ~fn:"set_cdr" ();
 
-  |> StringMap.add "set-car!"
-    (make_binary ~proc_ident:"set_car"
-       (fun out a b buf -> bprintf buf "%t=set_car(%t,%t);" out a b))
-  |> StringMap.add "set-cdr!"
-    (make_binary ~proc_ident:"set_cdr"
-       (fun out a b buf -> bprintf buf "%t=set_cdr(%t,%t);" out a b))
+  (let add_unary_chain ~name fns =
+     let begin_call = Buffer.create 0 in
+     let end_call = Buffer.create 0 in
+     fns |> List.iter (fun fn ->
+         Buffer.add_string begin_call fn;
+         Buffer.add_char begin_call '(';
+         Buffer.add_char end_call ')');
+     let begin_call = Buffer.contents begin_call in
+     let end_call = Buffer.contents end_call in
+     add_op ~name ~args:(Exactly 1)
+       ~static: (fun [@warning "-8"] ~args:[a] ~out ->
+           fun buf -> bprintf buf "%t=%s%t%s;" out begin_call a end_call)
+       ~dynamic: [Printf.sprintf "return %sC_ARG(0)%s;" begin_call end_call]
+       ();
+   in
 
-  |> StringMap.add "string?"
-    (make_unary ~proc_ident:"string_q"
-       (fun out a buf -> bprintf buf "%t=string_q(%t);" out a))
+   add_unary_chain ~name:"caar" ["car"; "car"];
+   add_unary_chain ~name:"cdar" ["cdr"; "car"];
+   add_unary_chain ~name:"cadr" ["car"; "cdr"];
+   add_unary_chain ~name:"cddr" ["cdr"; "cdr"];
 
-  |> StringMap.add "string-length"
-    (make_unary ~proc_ident:"string_length"
-       (fun out a buf -> bprintf buf "%t=string_length(%t);" out a))
+   add_unary_chain ~name:"caaar" ["car"; "car"; "car"];
+   add_unary_chain ~name:"cdaar" ["cdr"; "car"; "car"];
+   add_unary_chain ~name:"cadar" ["car"; "cdr"; "car"];
+   add_unary_chain ~name:"cddar" ["cdr"; "cdr"; "car"];
+   add_unary_chain ~name:"caadr" ["car"; "car"; "cdr"];
+   add_unary_chain ~name:"cdadr" ["cdr"; "car"; "cdr"];
+   add_unary_chain ~name:"caddr" ["car"; "cdr"; "cdr"];
+   add_unary_chain ~name:"cdddr" ["cdr"; "cdr"; "cdr"];
 
-  |> StringMap.add "string-copy"
-    (make_unary ~proc_ident:"string_copy"
-       (fun out a buf -> bprintf buf "%t=string_copy(%t);" out a))
+   add_unary_chain ~name:"caaaar" ["car"; "car"; "car"; "car"];
+   add_unary_chain ~name:"cdaaar" ["cdr"; "car"; "car"; "car"];
+   add_unary_chain ~name:"cadaar" ["car"; "cdr"; "car"; "car"];
+   add_unary_chain ~name:"cddaar" ["cdr"; "cdr"; "car"; "car"];
+   add_unary_chain ~name:"caadar" ["car"; "car"; "cdr"; "car"];
+   add_unary_chain ~name:"cdadar" ["cdr"; "car"; "cdr"; "car"];
+   add_unary_chain ~name:"caddar" ["car"; "cdr"; "cdr"; "car"];
+   add_unary_chain ~name:"cdddar" ["cdr"; "cdr"; "cdr"; "car"];
+   add_unary_chain ~name:"caaadr" ["car"; "car"; "car"; "cdr"];
+   add_unary_chain ~name:"cdaadr" ["cdr"; "car"; "car"; "cdr"];
+   add_unary_chain ~name:"cadadr" ["car"; "cdr"; "car"; "cdr"];
+   add_unary_chain ~name:"cddadr" ["cdr"; "cdr"; "car"; "cdr"];
+   add_unary_chain ~name:"caaddr" ["car"; "car"; "cdr"; "cdr"];
+   add_unary_chain ~name:"cdaddr" ["cdr"; "car"; "cdr"; "cdr"];
+   add_unary_chain ~name:"cadddr" ["car"; "cdr"; "cdr"; "cdr"];
+   add_unary_chain ~name:"cddddr" ["cdr"; "cdr"; "cdr"; "cdr"];
+  );
 
-  |> StringMap.add "display"
-    (make_unary ~proc_ident:"display"
-       (fun _ a buf -> bprintf buf "display(%t);" a))
+  add_unary_op ~name:"string?" ~ident:"string_q" ~fn:"string_q" ();
+  add_unary_op ~name:"string-copy" ~ident:"string_copy" ~fn:"string_copy" ();
+  add_unary_op ~name:"string-length" ~ident:"string_length" ~fn:"string_length" ();
 
-  |> StringMap.add "cons"
-    (make_binary ~proc_ident:"cons"
-       (fun out a b buf -> bprintf buf "%t=cons(%t,%t);" out a b))
+  add_op ~name:"display" ~args:(Exactly 1)
+    ~static: (fun ~args ~out buf -> bprintf buf "display(%t);MAKE_NIL(%t);" (List.hd args) out)
+    ~dynamic: ["display(C_ARG(0));"; "return NIL;"] ();
 
-  |> StringMap.add "counter"
-    (make_nullary ~proc_ident:"counter"
-       (fun out buf -> bprintf buf "%t=make_counter();" out))
+  add_action ~name:"dbg" ~body:"gc_debug()" ();
+  add_action ~name:"gc-collect" ~ident:"gc_collect" ~body:"gc_collect();" ();
 
-  |> StringMap.add "dbg"
-    (make_nullary_nil ~proc_ident:"dbg" "gc_debug();")
+  (!bindings, Array.of_list (List.rev !all_ops), !n)
 
-  |> StringMap.add "gc-collect"
-    (make_nullary_nil ~proc_ident:"gc_collect" "gc_collect();")
+let lookup ident = StringMap.find_opt ident bindings
 
-let lookup name = StringMap.find_opt name all_ops
+let static_use id = all_ops.(id) |> fst
+let init_cache () = Array.make num_ops false
+let dynamic_use cache id =
+  cache.(id) <- true;
+  let (_, dyn) = all_ops.(id) in
+  dyn.name
+
+let get_dynamic_used cache =
+  Array.to_seq all_ops
+  |> Utils.seq_mapi (fun i (_, dyn_impl) -> (cache.(i), dyn_impl))
+  |> Seq.filter_map (fun (used, impl) -> if used then Some impl else None)
+  |> List.of_seq

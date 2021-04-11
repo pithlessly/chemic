@@ -213,17 +213,32 @@ void gc_collect(void) {
     }
     // mark and copy all function arguments
     for (size_t i = 0; i < call_args.len; i++) {
-        gc_mark_and_copy(&call_args.buf[i]);
+        gc_mark_and_copy(&C_ARG(i));
     }
 }
 
 #define I64_MIN (~9223372036854775807)
+
+Obj less_than(Obj a, Obj b) {
+    EXPECT(a, tag_int);
+    EXPECT(b, tag_int);
+    return a.data.i < b.data.i ? TRUE : FALSE;
+}
 
 Obj add(Obj a, Obj b) {
     EXPECT(a, tag_int);
     EXPECT(b, tag_int);
     if (__builtin_add_overflow(a.data.i, b.data.i, &a.data.i)) {
         DIE("addition overflow");
+    }
+    return a;
+}
+
+Obj mul(Obj a, Obj b) {
+    EXPECT(a, tag_int);
+    EXPECT(b, tag_int);
+    if (__builtin_mul_overflow(a.data.i, b.data.i, &a.data.i)) {
+        DIE("multiplication overflow");
     }
     return a;
 }
@@ -244,21 +259,6 @@ Obj neg(Obj a) {
     }
     a.data.i = -a.data.i;
     return a;
-}
-
-Obj mul(Obj a, Obj b) {
-    EXPECT(a, tag_int);
-    EXPECT(b, tag_int);
-    if (__builtin_mul_overflow(a.data.i, b.data.i, &a.data.i)) {
-        DIE("multiplication overflow");
-    }
-    return a;
-}
-
-Obj less_than(Obj a, Obj b) {
-    EXPECT(a, tag_int);
-    EXPECT(b, tag_int);
-    return a.data.i < b.data.i ? TRUE : FALSE;
 }
 
 static Str *expect_str(Obj a) {
@@ -309,31 +309,6 @@ Obj cons(Obj a, Obj b) {
     c->cdr = b;
     a.tag = tag_cons;
     a.data.c = c;
-    return a;
-}
-
-static Obj do_counter(Vect *vars) {
-    UNSAFE_EXPECT_ARGS(0);
-    Obj a = vars->contents[0];
-    vars->contents[0].data.i++;
-    return a;
-}
-
-Obj make_counter(void) {
-    // allocate a vector to store the counter
-    Vect *v = alloc_vect(1);
-    MAKE_INT(v->contents[0], 0);
-
-    // allocate a closure pointing to the vector
-    Closure *clo = retry_heap_alloc(alignof(Closure), sizeof(Closure));
-    clo->gc_tag = NULL;
-    clo->run = do_counter;
-    clo->env = v;
-
-    // return an object that points to the closure
-    Obj a;
-    a.tag = tag_closure;
-    a.data.cl = clo;
     return a;
 }
 

@@ -45,7 +45,12 @@ end
 (* Return a Writer.t that emits a sequence of statements which have the
  * effect of evaluating the given expression and assigning the return value
  * to the given register. *)
-let write_expr ~(global: Expr.global_writers) ~write_access_var ~rctx =
+let write_expr
+    ~op_cache
+    ~(global: Expr.global_writers)
+    ~write_access_var
+    ~rctx
+  =
   let rec go ~reg = function
     | Int i -> fun buf ->
       bprintf buf "MAKE_INT(%t,%Ld);" (Register.write reg) i
@@ -60,10 +65,9 @@ let write_expr ~(global: Expr.global_writers) ~write_access_var ~rctx =
           (write_access_var id)
 
     | OperatorArg op ->
+      let ident = Operator.dynamic_use op_cache op in
       fun buf ->
-        bprintf buf "MAKE_PROC(%t,&operator_%s);"
-          (Register.write reg)
-          op.proc_ident
+        bprintf buf "MAKE_PROC(%t,&%t);" (Register.write reg) ident 
 
     | Define (id, x) ->
       let expr = go ~reg x in
@@ -132,6 +136,7 @@ let write_expr ~(global: Expr.global_writers) ~write_access_var ~rctx =
         bprintf buf "%t=call(%t);" (Register.write reg) (Register.write reg)
 
     | Operator (op, args) ->
+      let op = Operator.static_use op in
       (* check that the right number of arguments are being passed *)
       let num_args = List.length args in
       (match op.args with
@@ -165,7 +170,7 @@ let write_expr ~(global: Expr.global_writers) ~write_access_var ~rctx =
 
 (* Write the content of a function body which is common to both
  * procedures and the top level *)
-let write_local ~(global: Expr.global_writers) (local: Expr.local_data) =
+let write_local ~op_cache ~(global: Expr.global_writers) (local: Expr.local_data) =
   let fwd_env_offset = if local.fwd_env then 1 else 0 in
 
   (* generate writers for every expr in the function body *)
@@ -200,7 +205,7 @@ let write_local ~(global: Expr.global_writers) (local: Expr.local_data) =
         fun buf ->
           bprintf buf "ENV_LOCAL(%t,%d)" lval (pos + fwd_env_offset)
     in
-    List.map (write_expr ~global ~write_access_var ~rctx) local.body
+    List.map (write_expr ~op_cache ~global ~write_access_var ~rctx) local.body
   in
 
   (* the `r` array will hold all unboxed variables, followed
@@ -264,8 +269,8 @@ let write_proc_sig (proc: Expr.proc_writers) buf =
        "void")
 
 (* Write a function implementing the body of a procedure *)
-let write_proc ~global (proc: Expr.proc_writers) =
-  let local = write_local ~global proc.local in
+let write_proc ~op_cache ~global (proc: Expr.proc_writers) =
+  let local = write_local ~op_cache ~global proc.local in
   fun buf ->
     bprintf buf "static Obj %t(%s) {\n" proc.name
       (if proc.is_closure || proc.local.fwd_env then
@@ -277,8 +282,8 @@ let write_proc ~global (proc: Expr.proc_writers) =
     bprintf buf "  return r[REG];\n}\n"
 
 (* Write main(), implementing the top-level procedure *)
-let write_main ~(global: Expr.global_writers) =
-  let local = write_local ~global global.main in
+let write_main ~op_cache ~(global: Expr.global_writers) =
+  let local = write_local ~op_cache ~global global.main in
   fun buf ->
     Buffer.add_string buf "int main(void) {\n";
     Buffer.add_string buf "  initialize();\n";
@@ -289,17 +294,31 @@ let write_main ~(global: Expr.global_writers) =
     Buffer.add_string buf "  return 0;\n";
     Buffer.add_string buf "}\n"
 
+let write_cached ~op_cache =
+  let impls = Operator.get_dynamic_used op_cache in
+  fun buf -> impls |> List.iter (fun (op: Operator.dynamic_impl) ->
+      bprintf buf "static Obj %t(void) {\n" op.name;
+      (match op.args with
+       | Operator.Exactly n -> bprintf buf "  expect_args_exact(%d);\n" n
+       | Operator.AtLeast n -> bprintf buf "  size_t var_args=expect_args_min(%d);\n" n);
+      op.body buf;
+      Buffer.add_string buf "}\n"
+    )
+
 (* Convert a syntax tree into a C program that evaluates each
  * top-level expression. *)
 let gen_code (global: Expr.global_writers) =
-  let main = write_main ~global in
+  let op_cache = Operator.init_cache () in
+  let main = write_main ~op_cache ~global in
+  let proc_writers =
+    Array.to_seq global.procs |> Seq.map (write_proc ~op_cache ~global) in
 
   let buf = Buffer.create 2048 in
   Buffer.add_string buf "#include \"chemic.h\"\n";
-  Buffer.add_string buf "#include \"operators.h\"\n";
+  write_cached ~op_cache buf;
   global.decls buf;
   global.procs |> Array.iter (fun proc -> write_proc_sig proc buf);
-  global.procs |> Array.iter (fun proc -> write_proc ~global proc buf);
+  proc_writers |> Seq.iter (fun writer -> writer buf);
   main buf;
 
   Buffer.contents buf

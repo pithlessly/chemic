@@ -170,24 +170,40 @@ inline static char const* classify(Tag t) {
     }
 }
 
+#define C_ARG(N) (call_args.buf[N])
+
 inline static void arg_push(Obj a) {
-    call_args.buf[call_args.len] = a;
+    C_ARG(call_args.len) = a;
     call_args.len++;
+}
+
+inline static void expect_args_exact(size_t n) {
+    if (call_args.len != n) {
+        FDIE("wrong number of arguments: procedure expected %zu, got %zu", \
+                n, call_args.len);
+    }
+    call_args.len = 0;
+}
+
+inline static size_t expect_args_min(size_t n) {
+    size_t len = call_args.len;
+    call_args.len = 0;
+    if (len < n) {
+        FDIE("wrong number of arguments: procedure expected at least %zu, got %zu", \
+                n, call_args.len);
+    }
+    return len;
 }
 
 // This macro is unsafe because it also declares a local variable
 // as a counter in the scope where it is used
 #define UNSAFE_EXPECT_ARGS(N) \
-    if (call_args.len != N) { \
-        FDIE("wrong number of arguments: procedure expected %d, got %zu", \
-                N, call_args.len); \
-    } \
-    call_args.len = 0; \
+    expect_args_exact(N); \
     size_t arg_i = 0;
 
 // This macro is unsafe because it uses the variable defined in the above macro
 #define UNSAFE_NEXT_ARG \
-    call_args.buf[arg_i++]
+    C_ARG(arg_i++)
 
 inline static Obj car(Obj a) {
     EXPECT(a, tag_cons);
@@ -215,16 +231,15 @@ inline static Obj set_cdr(Obj a, Obj b) {
 
 /*= external functions =*/
 
+extern Obj less_than(Obj a, Obj b);
 extern Obj add(Obj a, Obj b);
+extern Obj mul(Obj a, Obj b);
 extern Obj sub(Obj a, Obj b);
 extern Obj neg(Obj a);
-extern Obj mul(Obj a, Obj b);
-extern Obj less_than(Obj a, Obj b);
 extern Obj string_q(Obj a);
 extern Obj string_length(Obj a);
 extern Obj string_copy(Obj a);
 extern Obj cons(Obj a, Obj b);
-extern Obj make_counter(void);
 extern Obj make_closure(ClosureFn f, Vect *env);
 extern Obj call(Obj a);
 extern void display(Obj a);

@@ -248,6 +248,7 @@ let build_with ~(gctx: global_ctx): form list -> local_intermediate =
            false_case = recurse false_case }
 
     | List (f :: args) ->
+      (* TODO: this check is incorrect; global variables override builtins *)
       let op =
         match f with
         | Ident i -> Operator.lookup i

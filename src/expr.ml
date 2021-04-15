@@ -22,6 +22,7 @@ type expr =
   | OperatorArg of Operator.t
   | Define of var_id * expr
   | Let of { lhs: local_var_id; rhs: expr; body: expr list }
+  | Set of { lhs: var_id; rhs: expr }
   | Lambda of proc_id
   | If of { condition: expr; true_case: expr; false_case: expr }
   | Call of expr * expr list
@@ -96,7 +97,42 @@ type local_var_layer = {
   scope: local_var_id StringMap.t;
 }
 
+
 let build_with ~(gctx: global_ctx): form list -> local_intermediate =
+
+  (* find a variable in the given local or global scopes *)
+  let find_var ~local ~nonlocal name =
+    Printf.eprintf "looking for `%s`...\n" name;
+    local.scope |> StringMap.iter (Printf.eprintf "local scope: %s->%d\n");
+    match StringMap.find_opt name local.scope with
+    | Some id -> Some (Local id)
+
+    | None ->
+      (* if a variable name is found in an enclosing scope:
+       * - mark it as boxed
+       * - mark the current procedure as a closure *)
+      let do_search layer =
+        match StringMap.find_opt name layer.scope with
+        | Some id ->
+          layer.ctx |> make_local_boxed id;
+          Some (layer.id, id)
+
+        | None -> None
+      in
+
+      match Utils.search do_search nonlocal with
+      | Some (idx, (proc_id, id)) ->
+        local.ctx.is_closure <- true;
+        nonlocal |> Utils.iter_max
+          (fun local -> local.ctx.fwd_env <- true) idx;
+        Some (Nonlocal { distance = idx; proc_id; id })
+
+      | None ->
+        match StringMap.find_opt name gctx.globals with
+        | Some id -> Some (Global id)
+        | None -> Printf.eprintf "didn't find it!\n"; None
+  in
+
   let rec go
       ~(local: local_var_layer)
       ~(nonlocal: local_var_layer list)
@@ -105,39 +141,18 @@ let build_with ~(gctx: global_ctx): form list -> local_intermediate =
     function
 
     | Ident name ->
-      (match StringMap.find_opt name local.scope with
-       | Some id -> Var (Local id)
+      (match find_var ~local ~nonlocal name with
+       | Some v -> Var v
        | None ->
-         (* if a variable name is found in an enclosing scope, mark it as boxed and mark
-          * the current procedure as a closure *)
-         let do_search layer =
-           match StringMap.find_opt name layer.scope with
-           | None -> None
-           | Some id ->
-             layer.ctx |> make_local_boxed id;
-             Some (layer.id, id)
-         in
-
-         match Utils.search do_search nonlocal with
-         | Some (idx, (proc_id, id)) ->
-           local.ctx.is_closure <- true;
-           nonlocal |> Utils.iter_max
-             (fun local -> local.ctx.fwd_env <- true) idx;
-           Var (Nonlocal { distance = idx; proc_id; id })
-
+         match Operator.lookup name with
+         | Some op -> OperatorArg op
          | None ->
-           match StringMap.find_opt name gctx.globals with
-           | Some id -> Var (Global id)
-           | None ->
-             match Operator.lookup name with
-             | Some op -> OperatorArg op
-             | None ->
-               (* If an undefined variable is referenced in the global scope, we
-                * throw an error. Note that many Scheme implementations allow global
-                * variables to be defined using 'set!', which would make this error
-                * incorrect. However, such usage of 'set!' is not standard-compliant,
-                * so we don't have to support it. *)
-               raise (Invalid_argument (Printf.sprintf "undefined variable: %s" name)))
+           (* If an undefined variable is referenced in the global scope, we
+            * throw an error. Note that many Scheme implementations allow global
+            * variables to be defined using 'set!', which would make this error
+            * incorrect. However, such usage of 'set!' is not standard-compliant,
+            * so we don't have to support it. *)
+           raise (Invalid_argument (Printf.sprintf "undefined variable: %s" name)))
 
     | List [Ident "define"; Ident ident; expr] ->
       let id =
@@ -183,6 +198,14 @@ let build_with ~(gctx: global_ctx): form list -> local_intermediate =
       Let { lhs = lhs_id;
             rhs = recurse_rhs rhs;
             body = List.map recurse_body body }
+
+    | List [Ident "set!"; Ident name; rhs] ->
+      (match find_var ~local ~nonlocal name with
+       | Some lhs ->
+         let rhs = go ~local ~nonlocal ~block_level:false ~top_level: false rhs in
+         Set { lhs; rhs }
+       | None ->
+         raise (Invalid_argument (Printf.sprintf "undefined variable: %s" name)))
 
     | List (Ident "lambda" :: List params :: body) ->
       if Utils.null body then

@@ -30,6 +30,7 @@ type expr =
   | OperatorArg of Operator.t
   | Define of var_id * expr
   | Let of { lhs: local_var_id; rhs: expr; body: expr list }
+  | Set of { lhs: var_id; rhs: expr }
   | Lambda of proc_id
   | If of { condition: expr; true_case: expr; false_case: expr }
   | Call of expr * expr list

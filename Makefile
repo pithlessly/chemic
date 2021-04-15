@@ -6,6 +6,9 @@ runtime := tests/chemic.o
 test_driver := tests/main.py
 test_file := tests/test.md
 
+.PHONY: build
+build: $(ocaml_exec) $(runtime)
+
 .PHONY: test
 test: $(ocaml_exec) $(runtime) tests/main.ml tests/tests.md
 	cd tests && ocaml str.cma unix.cma main.ml tests.md

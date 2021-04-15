@@ -42,6 +42,61 @@ Identifiers can have leading digits:
 
     > (define 0_0 0)
 
+## Variables
+
+`(set!)` can be used to modify global variables:
+
+    > (define x 0)
+    > (display x)
+    > (set! x 1)
+    > (display x)
+    = 01
+
+As well as local variables and parameters:
+
+    > (let ((x 0))
+    >   (define f
+    >     (lambda (y)
+    >       (display y)
+    >       (set! y 1)
+    >       (display x)
+    >       (set! x y)))
+    >   (display x)
+    >   (display (f x))
+    >   (display x))
+    = 000()1
+
+Changes to nonlocal variables by closures are still visible during the next call:
+
+    > (define counter
+    >   (lambda ()
+    >     (define x 0)
+    >     (lambda ()
+    >       (set! x (+ x 1))
+    >       x)))
+    > (define c (counter))
+    > (display (c))
+    > (display (c))
+    > (display (c))
+    = 123
+
+They are also visible to other closures:
+
+    > (define getter-setter-generator
+    >   (let ((x "foo"))
+    >     (lambda ()
+    >       (cons (lambda () x)
+    >             (lambda (y) (set! x y))))))
+    >
+    > (define gs1 (getter-setter-generator))
+    > (define gs2 (getter-setter-generator))
+    > (display ((car gs1)))
+    > ((cdr gs1) "bar")
+    > (display ((car gs2)))
+    > ((cdr gs2) "baz")
+    > (display ((car gs1)))
+    = foobarbaz
+
 ## Scope rules
 
 This is one of the areas I had the most trouble with getting right. The spec

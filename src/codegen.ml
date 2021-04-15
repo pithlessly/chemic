@@ -5,6 +5,7 @@ type expr = Expr.expr =
   | OperatorArg of Operator.t
   | Define of Expr.var_id * expr
   | Let of { lhs: Expr.local_var_id; rhs: expr; body: expr list }
+  | Set of { lhs: Expr.var_id; rhs: expr }
   | Lambda of Expr.proc_id
   | If of { condition: expr; true_case: expr; false_case: expr }
   | Call of expr * expr list
@@ -89,6 +90,14 @@ let write_expr
         if Utils.null body then
           raise (Invalid_argument "let block is empty");
         body |> List.iter (bprintf buf "%t")
+
+    | Set { lhs; rhs } ->
+      let rhs = go ~reg rhs in
+      let var = write_access_var lhs in
+      let reg = Register.write reg in
+      fun buf ->
+        rhs buf;
+        bprintf buf "%t=%t;MAKE_NIL(%t);" var reg reg
 
     | Lambda id ->
       let proc = global.procs.(Expr.int_of_proc_id id) in

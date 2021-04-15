@@ -240,10 +240,10 @@ extern Obj string_q(Obj a);
 extern Obj string_length(Obj a);
 extern Obj string_copy(Obj a);
 extern Obj cons(Obj a, Obj b);
-extern Obj make_closure(ClosureFn f, Vect *env);
-extern Obj call(Obj a);
 extern void display(Obj a);
 
+extern Obj make_closure(ClosureFn f, Vect *env);
+extern Obj call(Obj a);
 extern Vect *alloc_vect(size_t len);
 
 extern void gc_push_roots(Obj *roots, size_t count);

@@ -174,6 +174,11 @@ Arithmetic operators function correctly:
     > (display (* 5 5))
     = 25
 
+    > (display (< 0 1))
+    > (display (< 0 (- 1)))
+    > (display (< 0 0))
+    = #t#f#f
+
 Some operators work with no arguments:
 
     > (display (+))
@@ -202,31 +207,6 @@ Operators fail if any intermediate computation overflows:
 
     > (- (- (- 9223372036854775807) 1))
     ! fatal error: negate underflow
-
-## Strings
-
-String literals and heap-allocated strings both count:
-
-    > (display (string? 0))
-    > (display (string? string?))
-    > (display (string? "abcd"))
-    > (display (string? (string-copy "abcd")))
-    = #f#f#t#t
-
-Strings are displayed without surrounding quotes:
-
-    > (display "abcd")
-    = abcd
-
-    > (display "a\nb")
-    = a
-    = b
-
-Other operators:
-
-    > (display (string-length "abcd"))
-    > (display (string-length ""))
-    = 40
 
 ## Cons cells
 
@@ -280,3 +260,50 @@ and 4-compositions:
     = ((a . b) c . d)((e . f) g . h)((i . j) k . l)((m . n) o . p)
     = (a . b)(c . d)(e . f)(g . h)(i . j)(k . l)(m . n)(o . p)
     = abcdefghijklmnop
+
+Components of cons cells can be modified using `(set-car!)` and `(set-cdr!)`:
+
+    > (define a! set-car!)
+    > (define d! set-cdr!)
+    > (define x (cons 1 2))
+    > (a! x 3)
+    > (display x)
+    > (d! x 4)
+    > (display x)
+    = (3 . 2)(3 . 4)
+
+These functions reveal that cons cells are passed by reference:
+
+    > (define nil nil)
+    > (define f
+    >   (lambda (c)
+    >     (set-cdr! c (cons "b" (cons "c" nil)))))
+    > (let ((c (cons "a" nil)))
+    >   (f c)
+    >   (display c))
+    = (a b c)
+
+## Strings
+
+String literals and heap-allocated strings both count:
+
+    > (display (string? 0))
+    > (display (string? string?))
+    > (display (string? "abcd"))
+    > (display (string? (string-copy "abcd")))
+    = #f#f#t#t
+
+Strings are displayed without surrounding quotes:
+
+    > (display "abcd")
+    = abcd
+
+    > (display "a\nb")
+    = a
+    = b
+
+Other operators:
+
+    > (display (string-length "abcd"))
+    > (display (string-length ""))
+    = 40

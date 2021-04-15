@@ -37,10 +37,21 @@ void initialize(void) {
     heap.len = 0;
 }
 
+void finalize(void) {
+    free(call_args.buf);
+    call_args.len = 0;
+    call_args.cap = 0;
+
+    free(heap.alive);
+    free(heap.dead);
+    heap.len = 0;
+    heap.cap = 0;
+}
+
 // NOTE: casting the returned pointer violates strict aliasing. Unfortunately
 // it seems that there's basically no way to write custom allocators without
 // doing so.
-void *heap_alloc(size_t align, size_t len) {
+static void *heap_alloc(size_t align, size_t len) {
     // TODO: only check this in debug mode
     if (align == 0 || (align & (align - 1)) != 0) {
         DIE("alignment must be power of 2");
@@ -57,7 +68,7 @@ void *heap_alloc(size_t align, size_t len) {
 
 // Attempt to allocate space for an object on the heap, but perform a GC
 // cycle if there is no space remaining.
-void *retry_heap_alloc(size_t align, size_t len) {
+static void *retry_heap_alloc(size_t align, size_t len) {
     void *p = heap_alloc(align, len);
     if (!p) {
         gc_collect();
@@ -113,7 +124,7 @@ void gc_debug(void) {
 
 static void gc_mark_and_copy_vect(Vect **v);
 
-void gc_mark_and_copy(Obj *o) {
+static void gc_mark_and_copy(Obj *o) {
     switch (o->tag) {
         case tag_nil:
         case tag_true:
@@ -312,32 +323,6 @@ Obj cons(Obj a, Obj b) {
     return a;
 }
 
-Obj make_closure(ClosureFn f, Vect *env) {
-    Closure *clo = retry_heap_alloc(alignof(Closure), sizeof(Closure));
-    clo->gc_tag = NULL;
-    clo->run = f;
-    clo->env = env;
-
-    Obj a;
-    a.tag = tag_closure;
-    a.data.cl = clo;
-    return a;
-}
-
-ArgVec call_args = { NULL, 0, 0 };
-
-Obj call(Obj a) {
-    switch (a.tag) {
-        case tag_proc:
-            return a.data.p();
-        case tag_closure:
-            return a.data.cl->run(a.data.cl->env);
-        default:
-            EXPECT(a, tag_proc);
-            return NIL;
-    }
-}
-
 static void display_str(Str *s) {
     fwrite(&s->data, sizeof(uint8_t), s->len, stdout);
 }
@@ -397,13 +382,28 @@ void display(Obj a) {
     }
 }
 
-void finalize(void) {
-    free(call_args.buf);
-    call_args.len = 0;
-    call_args.cap = 0;
+Obj make_closure(ClosureFn f, Vect *env) {
+    Closure *clo = retry_heap_alloc(alignof(Closure), sizeof(Closure));
+    clo->gc_tag = NULL;
+    clo->run = f;
+    clo->env = env;
 
-    free(heap.alive);
-    free(heap.dead);
-    heap.len = 0;
-    heap.cap = 0;
+    Obj a;
+    a.tag = tag_closure;
+    a.data.cl = clo;
+    return a;
+}
+
+ArgVec call_args = { NULL, 0, 0 };
+
+Obj call(Obj a) {
+    switch (a.tag) {
+        case tag_proc:
+            return a.data.p();
+        case tag_closure:
+            return a.data.cl->run(a.data.cl->env);
+        default:
+            EXPECT(a, tag_proc);
+            return NIL;
+    }
 }

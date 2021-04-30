@@ -231,6 +231,7 @@ inline static Obj set_cdr(Obj a, Obj b) {
 
 /*= external functions =*/
 
+extern Obj eqv_q(Obj a, Obj b);
 extern Obj less_than(Obj a, Obj b);
 extern Obj add(Obj a, Obj b);
 extern Obj mul(Obj a, Obj b);

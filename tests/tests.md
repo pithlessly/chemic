@@ -213,6 +213,58 @@ and those defined by the RHS of a `(let)`:
     >   (define x 0))
     = ()
 
+## Equivalence predicates
+
+The standard has no less than three general-purpose equivalence procedures
+(ignoring the type-specific ones): `eqv?`, `eq?`, and `equal?`. These differ in
+subtle ways with their handling of certain data types. However, since we don't
+have many of the fancier types like floats and symbols yet, most of what the
+standard says isn't really relevant.
+
+    > (display (eqv? 1 1))
+    > (display (eqv? 1 0))
+    = #t#f
+
+    > (define t (< 0 1))
+    > (define f (< 1 0))
+    > (display (eqv? t t))
+    > (display (eqv? f f))
+    > (display (eqv? t f))
+    = #t#t#f
+
+Comparing a string literal against another string literal of the same contents
+could return true or false according to the standard, since an intelligent
+implementation might recognize identical string literals and fold them into the
+same literal in the generated code. However, new strings produced by
+`string-copy` should be guaranteed to be different.
+
+    > (define x "a")
+    > (display (eqv? x "a"))
+    > (display (eqv? x x))
+    > (define y (string-copy x))
+    > (display (eqv? x y))
+    > (display (eqv? y y))
+    = #f#t#f#t
+
+This also applies to functions; the second call could go either way.
+
+    > (define f (lambda () 0))
+    > (define g (lambda () 0))
+    > (define h (lambda () 1))
+    > (display (eqv? f f))
+    > (display (eqv? f g))
+    > (display (eqv? f h))
+    = #t#f#f
+
+Like the other reference types, `eqv?` uses a pointer comparison on cons cells:
+
+    > (define c (cons 1 2))
+    > (define d (cons 1 2))
+    > (display (eqv? c d))
+    > (set-car! c c)
+    > (display (eqv? c (car c)))
+    = #f#t
+
 ## Arithmetic
 
 Arithmetic operators function correctly:

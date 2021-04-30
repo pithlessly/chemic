@@ -3,6 +3,7 @@
 #include <string.h>
 #include <inttypes.h>
 #include <stdalign.h>
+#include <stdbool.h>
 
 struct {
     // The half of the heap currently containing live objects
@@ -229,6 +230,42 @@ void gc_collect(void) {
 }
 
 #define I64_MIN (~9223372036854775807)
+
+Obj eqv_q(Obj a, Obj b) {
+    if (a.tag != b.tag) {
+        return FALSE;
+    }
+    bool res = false;
+    switch (a.tag) {
+        case tag_nil:
+        case tag_false:
+        case tag_true:
+            res = true;
+            break;
+        case tag_int:
+            res = (a.data.i == b.data.i);
+            break;
+        case tag_proc:
+            res = (a.data.p == b.data.p);
+            break;
+        case tag_closure:
+            res = (a.data.cl == b.data.cl);
+            break;
+        case tag_str:
+            res = (a.data.s == b.data.s);
+            break;
+        case tag_heap_str:
+            res = (a.data.hs == b.data.hs);
+            break;
+        case tag_cons:
+            res = (a.data.c == b.data.c);
+            break;
+        case tag_vect:
+            res = (a.data.v == b.data.v);
+            break;
+    }
+    return res ? TRUE : FALSE;
+}
 
 Obj less_than(Obj a, Obj b) {
     EXPECT(a, tag_int);

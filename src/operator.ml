@@ -51,6 +51,8 @@ let (bindings, (all_ops: (static_impl * dynamic_impl) array), num_ops) =
       ()
   in
 
+  add_binary_op ~name:"eqv?" ~ident:"eqv_q" ~fn:"eqv_q" ();
+
   add_binary_op ~name:"<" ~ident:"less_than" ~fn:"less_than" ();
 
   add_op ~name:"+" ~ident:"add" ~args:(AtLeast 0)

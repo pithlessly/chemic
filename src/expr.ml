@@ -102,8 +102,6 @@ let build_with ~(gctx: global_ctx): form list -> local_intermediate =
 
   (* find a variable in the given local or global scopes *)
   let find_var ~local ~nonlocal name =
-    Printf.eprintf "looking for `%s`...\n" name;
-    local.scope |> StringMap.iter (Printf.eprintf "local scope: %s->%d\n");
     match StringMap.find_opt name local.scope with
     | Some id -> Some (Local id)
 
@@ -130,7 +128,7 @@ let build_with ~(gctx: global_ctx): form list -> local_intermediate =
       | None ->
         match StringMap.find_opt name gctx.globals with
         | Some id -> Some (Global id)
-        | None -> Printf.eprintf "didn't find it!\n"; None
+        | None -> None
   in
 
   let rec go

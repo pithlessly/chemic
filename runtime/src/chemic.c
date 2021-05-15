@@ -2,7 +2,6 @@
 
 #include <string.h>
 #include <inttypes.h>
-#include <stdalign.h>
 #include <stdbool.h>
 
 struct {
@@ -132,12 +131,13 @@ static void gc_mark_and_copy(Obj *o) {
         case tag_false:
         case tag_int:
         case tag_proc:
-        case tag_str:
             break;
 
         case tag_closure:
             {
                 Closure *c = o->data.cl;
+                if (c->gc_tag == GC_SKIPME) break;
+
                 if (c->gc_tag == NULL) {
                     gc_mark_and_copy_vect(&c->env);
                     Closure *new = heap_alloc(alignof(Closure), sizeof(Closure));
@@ -151,25 +151,29 @@ static void gc_mark_and_copy(Obj *o) {
             }
             break;
 
-        case tag_heap_str:
+        case tag_str:
             {
-                HeapStr *hs = o->data.hs;
-                if (hs->gc_tag == NULL) {
-                    size_t size = sizeof(HeapStr) + hs->s.len;
-                    HeapStr *new = heap_alloc(alignof(HeapStr), size);
+                Str *s = o->data.s;
+                if (s->gc_tag == GC_SKIPME) break;
+
+                if (s->gc_tag == NULL) {
+                    size_t size = sizeof(Str) + s->len;
+                    Str *new = heap_alloc(alignof(Str), size);
                     if (new == NULL) {
                         DIE("out of memory");
                     }
-                    memcpy(new, hs, size);
-                    hs->gc_tag = new;
+                    memcpy(new, s, size);
+                    s->gc_tag = new;
                 }
-                o->data.hs = hs->gc_tag;
+                o->data.s = s->gc_tag;
             }
             break;
 
         case tag_cons:
             {
                 Cons *c = o->data.c;
+                if (c->gc_tag == GC_SKIPME) break;
+
                 if (c->gc_tag == NULL) {
                     gc_mark_and_copy(&c->car);
                     gc_mark_and_copy(&c->cdr);
@@ -191,6 +195,8 @@ static void gc_mark_and_copy(Obj *o) {
 }
 
 static void gc_mark_and_copy_vect(Vect **v) {
+    if ((*v)->gc_tag == GC_SKIPME) return;
+
     if ((*v)->gc_tag == NULL) {
         size_t len = (*v)->len;
         for (size_t i = 0; i < len; i++) {
@@ -254,9 +260,6 @@ Obj eqv_q(Obj a, Obj b) {
         case tag_str:
             res = (a.data.s == b.data.s);
             break;
-        case tag_heap_str:
-            res = (a.data.hs == b.data.hs);
-            break;
         case tag_cons:
             res = (a.data.c == b.data.c);
             break;
@@ -309,43 +312,26 @@ Obj neg(Obj a) {
     return a;
 }
 
-static Str *expect_str(Obj a) {
-    switch (a.tag) {
-        case tag_str:
-            return a.data.s;
-        case tag_heap_str:
-            return &a.data.hs->s;
-        default:
-            EXPECT(a, tag_str);
-            return NULL;
-    }
-}
-
 Obj string_q(Obj a) {
-    switch (a.tag) {
-        case tag_str:
-        case tag_heap_str:
-            return TRUE;
-        default:
-            return FALSE;
-    }
+    return a.tag == tag_str ? TRUE : FALSE;
 }
 
 Obj string_length(Obj a) {
-    size_t len = expect_str(a)->len;
-    MAKE_INT(a, len);
+    EXPECT(a, tag_str);
+    MAKE_INT(a, a.data.s->len);
     return a;
 }
 
 Obj string_copy(Obj a) {
-    Str *s = expect_str(a);
-    HeapStr *hs = retry_heap_alloc(alignof(HeapStr), sizeof(HeapStr) + s->len);
+    EXPECT(a, tag_str);
 
-    hs->gc_tag = NULL;
-    memcpy(&hs->s, s, sizeof(Str) + s->len);
+    Str *old = a.data.s;
+    Str *new = retry_heap_alloc(alignof(Str), sizeof(Str) + old->len);
+    memcpy(new, old, sizeof(Str) + old->len);
+    new->gc_tag = NULL;
 
-    a.tag = tag_heap_str;
-    a.data.hs = hs;
+    a.tag = tag_str;
+    a.data.s = new;
     return a;
 }
 
@@ -404,9 +390,6 @@ void display(Obj a) {
             break;
         case tag_str:
             display_str(a.data.s);
-            break;
-        case tag_heap_str:
-            display_str(&a.data.hs->s);
             break;
         case tag_cons:
             putchar('(');

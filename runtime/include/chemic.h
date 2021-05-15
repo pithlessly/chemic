@@ -6,6 +6,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
+#include <stdalign.h>
 
 /*= type definitions =*/
 
@@ -17,17 +18,11 @@ typedef enum {
     tag_proc,
     tag_closure,
     tag_str,
-    tag_heap_str,
     tag_cons,
     tag_vect,
 } Tag;
 
-typedef struct {
-    size_t len;
-    uint8_t data[];
-} Str;
-
-typedef struct HeapStr_s HeapStr;
+typedef struct Str_s Str;
 typedef struct Cons_s Cons;
 typedef struct Vect_s Vect;
 typedef struct Closure_s Closure;
@@ -39,15 +34,19 @@ typedef struct Obj_s {
         struct Obj_s (*p)(void);
         Closure *cl;
         Str *s;
-        HeapStr *hs;
         Cons *c;
         Vect *v;
     } data;
 } Obj;
 
-struct HeapStr_s {
-    HeapStr *gc_tag;
-    Str s;
+// Any `gc_tag` set to this value indicates that the object containing it is
+// static and should be skipped by the garbage collector.
+static void * const GC_SKIPME = (void *) alignof(Obj) + 1;
+
+struct Str_s {
+    Str *gc_tag;
+    size_t len;
+    uint8_t data[];
 };
 
 struct Cons_s {
@@ -83,16 +82,15 @@ extern ArgVec call_args;
 
 inline static char const* classify(Tag t) {
     switch (t) {
-        case tag_nil:      return "nil";
+        case tag_nil:     return "nil";
         case tag_true:
-        case tag_false:    return "boolean";
-        case tag_int:      return "int";
-        case tag_proc:     return "procedure";
-        case tag_closure:  return "closure"; // TODO merge with procedure
-        case tag_str:
-        case tag_heap_str: return "string";
-        case tag_cons:     return "cons";
-        case tag_vect:     return "vector";
+        case tag_false:   return "boolean";
+        case tag_int:     return "int";
+        case tag_proc:    return "procedure";
+        case tag_closure: return "closure"; // TODO merge with procedure
+        case tag_str:     return "string";
+        case tag_cons:    return "cons";
+        case tag_vect:    return "vector";
     }
 }
 
@@ -112,6 +110,20 @@ inline static char const* classify(Tag t) {
 #define EXPECT(T, TAG) \
     if (T.tag != TAG) { \
         FDIE("expected %s, got %s", classify(TAG), classify(T.tag)); \
+    } else (void) 0
+
+// If the `gc_tag` field of T's pointee indicates that it is constant, raise an
+// error. Also do a sanity check to ensure we aren't pointing to an object
+// that had its `gc_tag` set because it was moved. This shouldn't happen
+// because the garbage collector should have correctly updated all pointers to
+// point to the new location, but since it's cheap to check that here just in
+// case, we do so.
+#define EXPECT_MUT(T) \
+    if (T->gc_tag != NULL) { \
+        FDIE("%s", \
+            T->gc_tag == GC_SKIPME \
+            ? "cannot modify constant object" \
+            : "found moved object (should be impossible)"); \
     } else (void) 0
 
 #define MAKE_INT(T, I) \
@@ -217,6 +229,7 @@ inline static Obj cdr(Obj a) {
 
 inline static Obj set_car(Obj a, Obj b) {
     EXPECT(a, tag_cons);
+    //EXPECT_MUT(a.data.c);
     a.data.c->car = b;
     MAKE_NIL(a);
     return a;
@@ -224,6 +237,7 @@ inline static Obj set_car(Obj a, Obj b) {
 
 inline static Obj set_cdr(Obj a, Obj b) {
     EXPECT(a, tag_cons);
+    EXPECT_MUT(a.data.c);
     a.data.c->cdr = b;
     MAKE_NIL(a);
     return a;

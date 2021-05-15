@@ -377,7 +377,7 @@ let build forms =
         |> List.to_seq
         |> Utils.seq_mapi (fun i lit ->
             fun buf ->
-              bprintf buf "STR%d={%d,%t}"
+              bprintf buf "STR%d={GC_SKIPME,%d,%t}"
                 i
                 (String.length lit) (* 'len' field *)
                 (Writer.c_string lit) (* 'data' field *)

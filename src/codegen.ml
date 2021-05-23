@@ -14,33 +14,32 @@ type expr = Expr.expr =
 let bprintf = Printf.bprintf
 
 module Register: sig
-  (* tracks information related to generated registers *)
-  type ctx
+  (* represents a register *)
   type t
-
-  (* create a new context *)
-  val init: unit -> ctx
-  (* the initial register associated with a context *)
-  val zero: ctx -> t
-  (* return the next register *)
-  val next: ctx -> t -> t
-  (* get the total number of registers currently being used *)
-  val allocated: ctx -> int
-  (* write as a C lvalue *)
+  (* write the register as a C lvalue *)
   val write: t -> Writer.t
+
+  (* tracks information related to generated registers *)
+  class ctx: object
+    (* get the initial register associated with a context *)
+    method zero: t
+    (* return the next register *)
+    method next: t -> t
+    (* get the total number of registers currently being used *)
+    method allocated: int
+  end
 end = struct
-  (* stores the highest register not yet used *)
-  type ctx = int ref
   type t = int
+  let write r = fun buf -> bprintf buf "r[REG+%d]" r
 
-  let init () = ref 0
-  let next ctx r =
-    ctx := max !ctx (r + 2);
-    r + 1
-  let zero ctx = next ctx (-1)
-
-  let allocated ctx = !ctx
-  let write r buf = bprintf buf "r[REG+%d]" r
+  class ctx = object (self)
+    val mutable next = 0
+    method zero = self#next (-1)
+    method next r =
+      next <- max next (r + 2);
+      r + 1
+    method allocated = next
+  end
 end
 
 (* Return a Writer.t that emits a sequence of statements which have the
@@ -131,7 +130,7 @@ let write_expr
 
         let current_reg = ref reg in
         args |> Utils.unzip_with (fun expr ->
-            let reg = Register.next rctx !current_reg in
+            let reg = rctx#next !current_reg in
             current_reg := reg;
             (go ~reg expr, Register.write reg)
           )
@@ -166,7 +165,7 @@ let write_expr
             let reg = Lazy.force !current_reg in
             (* only compute this on the next iteration to avoid
              * allocating one more register than we need *)
-            current_reg := lazy (Register.next rctx reg);
+            current_reg := lazy (rctx#next reg);
             (go ~reg expr, Register.write reg)
           )
       in
@@ -175,7 +174,7 @@ let write_expr
         List.iter (fun w -> w buf) args_writers;
         impl_writer buf
 
-  in fun expr -> go ~reg:(Register.zero rctx) expr
+  in fun expr -> go ~reg:rctx#zero expr
 
 (* Write the content of a function body which is common to both
  * procedures and the top level *)
@@ -183,7 +182,7 @@ let write_local ~op_cache ~(global: Expr.global_writers) (local: Expr.local_data
   let fwd_env_offset = if local.fwd_env then 1 else 0 in
 
   (* generate writers for every expr in the function body *)
-  let rctx = Register.init () in
+  let rctx = new Register.ctx in
   let body =
     (* convert an `Expr.var_id` to an lvalue *)
     let write_access_var = function
@@ -219,7 +218,7 @@ let write_local ~op_cache ~(global: Expr.global_writers) (local: Expr.local_data
 
   (* the `r` array will hold all unboxed variables, followed
    * by temporaries needed for expression evaluation *)
-  let num_temps = Register.allocated rctx in
+  let num_temps = rctx#allocated in
   let num_registers = local.num_unboxed + num_temps in
 
   (* the `e` array will hold all boxed variables, preceded by a `vect`

@@ -37,22 +37,27 @@ type var_metadata = {
   boxed: bool;
 }
 
-type local_ctx = {
-  mutable vars: var_metadata IntMap.t;
-  (* does this procedure contain variables captured by inner lambdas? *)
-  mutable is_closure: bool;
-  (* are variables from enclosing procedures captured by inner lambdas? *)
-  mutable fwd_env: bool;
-}
+class local_ctx = object
+  val mutable vars = IntMap.empty
+  val mutable is_closure = false
+  val mutable fwd_env = false
 
-let new_local_var source lctx =
-  let id = IntMap.cardinal lctx.vars in
-  lctx.vars <- IntMap.add id { source; pos = 0; boxed = false } lctx.vars;
-  id
+  method new_var source =
+    let id = IntMap.cardinal vars in
+    vars <- IntMap.add id { source; pos = 0; boxed = false } vars;
+    id
 
-let make_local_boxed id lctx =
-  let metadata = IntMap.find id lctx.vars in
-  lctx.vars <- IntMap.add id { metadata with boxed = true } lctx.vars
+  method make_boxed id =
+    let metadata = IntMap.find id vars in
+    vars <- IntMap.add id { metadata with boxed = true } vars
+
+  method mark_closure = is_closure <- true
+  method mark_fwd_env = fwd_env <- true
+
+  method vars = IntMap.to_seq vars
+  method is_closure = is_closure
+  method fwd_env = fwd_env
+end
 
 type local_intermediate = {
   lctx: local_ctx;
@@ -65,17 +70,41 @@ type proc_intermediate = {
   num_params: int;
 }
 
-type global_ctx = {
-  mutable string_literals: string list;
-  (* should be the same as 'List.length string_literals' *)
-  mutable num_strings: int;
+class global_ctx = object (self)
+  val mutable string_literals: string list = []
+  (* should equal the length of `string_literals` *)
+  val mutable num_strings = 0
 
-  mutable procs: proc_intermediate list;
-  (* should be the same as 'List.length procs' *)
-  mutable num_procs: int;
+  method add_string s =
+    let id = num_strings in
+    num_strings <- id + 1;
+    string_literals <- s :: string_literals;
+    id
 
-  mutable globals: global_var_id StringMap.t;
-}
+  method string_literals = List.rev string_literals
+
+  val mutable procs: proc_intermediate list = []
+  (* should equal the length of `procs` *)
+  val mutable num_procs = 0
+
+  method add_proc ~local ~num_params =
+    let id = num_procs in
+    num_procs <- id + 1;
+    procs <- { local; num_params } :: procs;
+    id
+
+  method procs = List.rev procs
+
+  val mutable globals: global_var_id StringMap.t = StringMap.empty
+
+  method num_globals = StringMap.cardinal globals
+
+  method add_global var =
+    let id = self#num_globals in
+    globals <- StringMap.add var id globals
+
+  method get_global name = StringMap.find_opt name globals
+end
 
 let find_defined_vars forms =
   let present = ref StringMap.empty in
@@ -97,7 +126,6 @@ type local_var_layer = {
   scope: local_var_id StringMap.t;
 }
 
-
 let build_with ~(gctx: global_ctx): form list -> local_intermediate =
 
   (* find a variable in the given local or global scopes *)
@@ -112,7 +140,7 @@ let build_with ~(gctx: global_ctx): form list -> local_intermediate =
       let do_search layer =
         match StringMap.find_opt name layer.scope with
         | Some id ->
-          layer.ctx |> make_local_boxed id;
+          layer.ctx#make_boxed id;
           Some (layer.id, id)
 
         | None -> None
@@ -120,13 +148,13 @@ let build_with ~(gctx: global_ctx): form list -> local_intermediate =
 
       match Utils.search do_search nonlocal with
       | Some (idx, (proc_id, id)) ->
-        local.ctx.is_closure <- true;
+        local.ctx#mark_closure;
         nonlocal |> Utils.iter_max
-          (fun local -> local.ctx.fwd_env <- true) idx;
+          (fun local -> local.ctx#mark_fwd_env) idx;
         Some (Nonlocal { distance = idx; proc_id; id })
 
       | None ->
-        match StringMap.find_opt name gctx.globals with
+        match gctx#get_global name with
         | Some id -> Some (Global id)
         | None -> None
   in
@@ -157,7 +185,7 @@ let build_with ~(gctx: global_ctx): form list -> local_intermediate =
         if not block_level then
           raise (Invalid_argument "(define) cannot be used as an expression")
         else if top_level then
-          Global (StringMap.find ident gctx.globals)
+          Global (gctx#get_global ident |> Option.get)
         else
           Local (StringMap.find ident local.scope)
       in
@@ -171,7 +199,7 @@ let build_with ~(gctx: global_ctx): form list -> local_intermediate =
       let define_scope =
         find_defined_vars body
         |> Seq.map (fun var ->
-            let id = local.ctx |> new_local_var `Internal in
+            let id = local.ctx#new_var `Internal in
             (var, id))
         |> StringMap.of_seq
       in
@@ -180,7 +208,7 @@ let build_with ~(gctx: global_ctx): form list -> local_intermediate =
         go ~local ~nonlocal ~block_level:false ~top_level:false
       in
       (* add the variable being bound into the local state *)
-      let lhs_id = local.ctx |> new_local_var `Internal in
+      let lhs_id = local.ctx#new_var `Internal in
       (* update the local scope with the variable being bound and the
        * variables that were (define)d; the latter take precedence *)
       let new_scope =
@@ -209,10 +237,7 @@ let build_with ~(gctx: global_ctx): form list -> local_intermediate =
       if Utils.null body then
         raise (Invalid_argument "lambda body cannot be empty");
 
-      let lctx = {
-        vars = IntMap.empty;
-        is_closure = false;
-        fwd_env = false } in
+      let lctx = new local_ctx in
 
       (* Add a dummy procedure to `gctx` with an empty body -
        * the reason it is necessary to do this beforehand is so
@@ -222,10 +247,10 @@ let build_with ~(gctx: global_ctx): form list -> local_intermediate =
        * in `local_intermediate` with the result (and `lctx` is
        * also mutated in the process. *)
       let local_interm = { lctx; body = [] } in
-      gctx.procs <- { local = local_interm;
-                      num_params = List.length params } :: gctx.procs;
-      let id = gctx.num_procs in
-      gctx.num_procs <- id + 1;
+      let id = gctx#add_proc
+          ~local:local_interm
+          ~num_params:(List.length params)
+      in
 
       (* get sequences of two kinds of local variables and their sources:
        * those which are parameters, and those (define)d *)
@@ -245,7 +270,7 @@ let build_with ~(gctx: global_ctx): form list -> local_intermediate =
         scope =
           Seq.append param_vars defined_vars
           |> Seq.map (fun (var, source) ->
-              let id = lctx |> new_local_var source in
+              let id = lctx#new_var source in
               (var, id)
             )
           |> StringMap.of_seq;
@@ -289,23 +314,13 @@ let build_with ~(gctx: global_ctx): form list -> local_intermediate =
       Int i
 
     | String s ->
-      let id = gctx.num_strings in
-      gctx.num_strings <- id + 1;
-      gctx.string_literals <- s :: gctx.string_literals;
-      String id
+      String (gctx#add_string s)
 
   in
   fun forms ->
-    let lctx = {
-      vars = IntMap.empty;
-      is_closure = false;
-      fwd_env = false } in
+    let lctx = new local_ctx in
     (* treat all `(define)`d variables at the top level as globals *)
-    find_defined_vars forms
-    |> Utils.seq_iteri (fun i var ->
-        let id = i in
-        gctx.globals <- StringMap.add var id gctx.globals;
-      );
+    find_defined_vars forms |> Seq.iter gctx#add_global;
     { lctx;
       body = forms |> List.map
                (go
@@ -328,7 +343,7 @@ let write_local { lctx; body } =
   let num_boxed = ref 0 in
   let num_unboxed = ref 0 in
   let locals =
-    IntMap.to_seq lctx.vars
+    lctx#vars
     |> Seq.map (fun (_, metadata) ->
         let r = if metadata.boxed then num_boxed else num_unboxed in
         let pos = !r in
@@ -340,7 +355,7 @@ let write_local { lctx; body } =
   { locals;
     num_boxed = !num_boxed;
     num_unboxed = !num_unboxed;
-    fwd_env = lctx.fwd_env;
+    fwd_env = lctx#fwd_env;
     body }
 
 type proc_writers = {
@@ -358,22 +373,18 @@ type global_writers = {
 }
 
 let build forms =
-  let gctx = { string_literals = [];
-               num_strings = 0;
-               procs = [];
-               num_procs = 0;
-               globals = StringMap.empty }
-  in
+  let gctx = new global_ctx in
 
   let main = build_with ~gctx forms in
 
   (* declarations of global static values to hold string literals *)
   let write_string_decls =
-    if gctx.num_strings = 0 then
+    let strings = gctx#string_literals in
+    if Utils.null strings then
       Writer.empty
     else
       let decls =
-        List.rev gctx.string_literals
+        strings
         |> List.to_seq
         |> Utils.seq_mapi (fun i lit ->
             fun buf ->
@@ -387,7 +398,7 @@ let build forms =
       fun buf -> bprintf buf "static Str %t;\n" decls
   in
 
-  let num_globals = StringMap.cardinal gctx.globals in
+  let num_globals = gctx#num_globals in
 
   (* declarations of global static objects to hold global variables *)
   let write_global_decls =
@@ -412,13 +423,13 @@ let build forms =
          write_num_global_decl buf);
 
     procs =
-      List.rev gctx.procs
+      gctx#procs
       |> List.to_seq
       |> Utils.seq_mapi (fun i (proc: proc_intermediate) ->
           { name = (fun buf -> bprintf buf "PROC%d" i);
             num_params = proc.num_params;
             local = write_local proc.local;
-            is_closure = proc.local.lctx.is_closure })
+            is_closure = proc.local.lctx#is_closure })
       |> Array.of_seq;
 
     main = write_local main;

@@ -41,7 +41,7 @@ typedef struct Obj_s {
 
 // Any `gc_tag` set to this value indicates that the object containing it is
 // static and should be skipped by the garbage collector.
-static void * const GC_SKIPME = (void *) alignof(Obj) + 1;
+#define GC_SKIPME ((void *) (alignof(Obj) + 1))
 
 struct Str_s {
     Str *gc_tag;
@@ -229,7 +229,7 @@ inline static Obj cdr(Obj a) {
 
 inline static Obj set_car(Obj a, Obj b) {
     EXPECT(a, tag_cons);
-    //EXPECT_MUT(a.data.c);
+    EXPECT_MUT(a.data.c);
     a.data.c->car = b;
     MAKE_NIL(a);
     return a;

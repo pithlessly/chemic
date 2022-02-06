@@ -86,8 +86,8 @@ inline static char const* classify(Tag t) {
         case tag_true:
         case tag_false:   return "boolean";
         case tag_int:     return "int";
-        case tag_proc:    return "procedure";
-        case tag_closure: return "closure"; // TODO merge with procedure
+        case tag_proc:
+        case tag_closure: return "procedure";
         case tag_str:     return "string";
         case tag_cons:    return "cons";
         case tag_vect:    return "vector";
